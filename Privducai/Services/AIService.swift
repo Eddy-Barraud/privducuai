@@ -8,12 +8,15 @@
 import Foundation
 import Combine
 import NaturalLanguage
+#if canImport(FoundationModels)
 import FoundationModels
+#endif
 
 @MainActor
 class AIService: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: String = ""
+    /// Indicates if the Foundation Models framework is conditionally available
     @Published var modelAvailable = false
 
     private let webScraper = WebScrapingService()
@@ -26,9 +29,8 @@ class AIService: ObservableObject {
 
     /// Check if Foundation Models are available
     private func checkModelAvailability() async {
-        // Check if Foundation Models are available on this system
+#if canImport(FoundationModels)
         let availability = LanguageModel.availability
-
         if availability == .available {
             self.modelAvailable = true
             print("✓ Foundation Models are available")
@@ -36,6 +38,10 @@ class AIService: ObservableObject {
             self.modelAvailable = false
             print("⚠️ Foundation Models not available (status: \(availability)), using fallback summarization")
         }
+#else
+        self.modelAvailable = false
+        print("⚠️ Foundation Models framework not available at compile time, using fallback summarization")
+#endif
     }
 
     /// Summarize search results using Foundation Models or fallback to NLP
@@ -74,8 +80,8 @@ class AIService: ObservableObject {
 
     /// Generate summary using Apple Foundation Models
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult]) async -> String {
+#if canImport(FoundationModels)
         do {
-            // Prepare the system prompt
             let systemPrompt = """
             You are a helpful AI assistant that provides concise, accurate summaries of web search results.
             Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
@@ -88,7 +94,6 @@ class AIService: ObservableObject {
             - Use clear, easy-to-understand language
             """
 
-            // Prepare the user prompt with query and context
             let userPrompt = """
             User Query: \(query)
 
@@ -103,7 +108,7 @@ class AIService: ObservableObject {
             Keep the summary under 300 words.
             """
 
-            // Create request with system and user messages
+            // Construct a simple request; if your SDK uses different types, adjust accordingly
             let request = LanguageModelRequest(
                 messages: [
                     .init(role: .system, content: systemPrompt),
@@ -111,16 +116,13 @@ class AIService: ObservableObject {
                 ]
             )
 
-            // Generate the summary
             let response = try await LanguageModel.shared.perform(request)
 
-            // Extract the generated text
             var generatedText = ""
             if let firstChoice = response.choices.first {
                 generatedText = firstChoice.message.content
             }
 
-            // Add source links
             var finalSummary = generatedText + "\n\n**Sources:**\n"
             for (index, result) in results.prefix(5).enumerated() {
                 finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
@@ -129,9 +131,12 @@ class AIService: ObservableObject {
             return finalSummary
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
-            // Fallback to basic summarization
-            return await generateConciseSummary(query: query, context: fullContext, results: results)
+            return await generateConciseSummary(query: query, context: context, results: results)
         }
+#else
+        // FoundationModels not available at compile time; fall back immediately
+        return await generateConciseSummary(query: query, context: context, results: results)
+#endif
     }
 
     /// Generate a concise summary with links
@@ -255,3 +260,4 @@ class AIService: ObservableObject {
         return nil
     }
 }
+
