@@ -128,6 +128,13 @@ struct SearchView: View {
                 Text("AI Summary")
                     .font(.headline)
                     .fontWeight(.semibold)
+
+                if aiService.modelAvailable {
+                    Text("• Foundation Models")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+
                 Spacer()
                 if aiService.isSummarizing {
                     ProgressView()
@@ -136,7 +143,7 @@ struct SearchView: View {
             }
 
             if aiService.isSummarizing {
-                Text("Analyzing results...")
+                Text("Analyzing full web pages...")
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {

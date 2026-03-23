@@ -8,27 +8,133 @@
 import Foundation
 import Combine
 import NaturalLanguage
+import FoundationModels
 
 @MainActor
 class AIService: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: String = ""
+    @Published var modelAvailable = false
 
-    /// Summarize search results using on-device NLP
+    private let webScraper = WebScrapingService()
+    private var languageModelManager: LanguageModelManager?
+    private var languageModelSession: LanguageModelSession?
+
+    init() {
+        Task {
+            await checkModelAvailability()
+        }
+    }
+
+    /// Check if Foundation Models are available
+    private func checkModelAvailability() async {
+        do {
+            // Check if language models are available
+            let manager = LanguageModelManager()
+            let availability = await manager.availability()
+
+            if availability.status == .available {
+                self.languageModelManager = manager
+                self.modelAvailable = true
+                print("✓ Foundation Models are available")
+            } else {
+                self.modelAvailable = false
+                print("⚠️ Foundation Models not available, using fallback summarization")
+            }
+        } catch {
+            self.modelAvailable = false
+            print("⚠️ Error checking model availability: \(error.localizedDescription)")
+        }
+    }
+
+    /// Summarize search results using Foundation Models or fallback to NLP
     func summarize(query: String, results: [SearchResult]) async -> String {
         isSummarizing = true
         defer { isSummarizing = false }
 
-        // Combine all snippets for context
-        let allText = results.map { result in
-            "\(result.title): \(result.snippet)"
-        }.joined(separator: "\n\n")
+        // Scrape content from top pages
+        let urls = results.map { $0.url }
+        let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: 10)
 
-        // Use Apple's NaturalLanguage for efficient text processing
-        let summary = await generateConciseSummary(query: query, context: allText, results: results)
+        // Combine scraped content with snippets
+        var contextParts: [String] = []
+
+        for result in results {
+            if let pageContent = scrapedContent[result.url] {
+                contextParts.append("Source: \(result.title)\nURL: \(result.url)\nContent: \(pageContent)")
+            } else {
+                contextParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
+            }
+        }
+
+        let fullContext = contextParts.joined(separator: "\n\n---\n\n")
+
+        // Use Foundation Models if available, otherwise fallback
+        let summary: String
+        if modelAvailable, let manager = languageModelManager {
+            summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results, manager: manager)
+        } else {
+            summary = await generateConciseSummary(query: query, context: fullContext, results: results)
+        }
 
         self.summary = summary
         return summary
+    }
+
+    /// Generate summary using Apple Foundation Models
+    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], manager: LanguageModelManager) async -> String {
+        do {
+            // Create a session if we don't have one
+            if languageModelSession == nil {
+                let instructions = """
+                You are a helpful AI assistant that provides concise, accurate summaries of web search results.
+                Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
+
+                Guidelines:
+                - Be concise but comprehensive
+                - Focus on the most relevant information
+                - Include key facts and details
+                - Maintain accuracy
+                - Use clear, easy-to-understand language
+                """
+
+                languageModelSession = try await manager.createSession(instructions: instructions)
+            }
+
+            guard let session = languageModelSession else {
+                return await generateConciseSummary(query: query, context: context, results: results)
+            }
+
+            // Prepare the prompt with query and context
+            let prompt = """
+            User Query: \(query)
+
+            Web Content:
+            \(context)
+
+            Please provide a concise summary that answers the user's query based on the above web content. Structure your response with:
+            1. A direct answer to the query
+            2. Key supporting details
+            3. Any important context or caveats
+
+            Keep the summary under 300 words.
+            """
+
+            // Generate the summary
+            let response = try await session.generate(prompt: prompt)
+
+            // Add source links
+            var finalSummary = response + "\n\n**Sources:**\n"
+            for (index, result) in results.prefix(5).enumerated() {
+                finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
+            }
+
+            return finalSummary
+        } catch {
+            print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
+            // Fallback to basic summarization
+            return await generateConciseSummary(query: query, context: context, results: results)
+        }
     }
 
     /// Generate a concise summary with links
