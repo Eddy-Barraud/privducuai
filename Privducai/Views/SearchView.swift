@@ -16,6 +16,10 @@ struct SearchView: View {
     @State private var showingSummary = false
     @State private var errorMessage: String?
 
+    // Settings
+    @State private var settings = AppSettings()
+    @State private var showSettings = false
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -48,6 +52,13 @@ struct SearchView: View {
                 .font(.title)
                 .fontWeight(.bold)
             Spacer()
+
+            Button(action: { showSettings.toggle() }) {
+                Image(systemName: "gear")
+                    .font(.title2)
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
@@ -164,31 +175,118 @@ struct SearchView: View {
 
     // MARK: - Welcome View
     private var welcomeView: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 64))
-                .foregroundColor(.accentColor)
+        ScrollView {
+            VStack(spacing: 24) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 64))
+                    .foregroundColor(.accentColor)
 
-            VStack(spacing: 8) {
-                Text("Search the Web Efficiently")
-                    .font(.title2)
+                VStack(spacing: 8) {
+                    Text("Search the Web Efficiently")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+
+                    Text("Get concise AI-powered summaries of web results\nwithout draining your battery")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                VStack(alignment: .leading, spacing: 12) {
+                    FeatureRow(icon: "bolt.fill", title: "Fast & Efficient", description: "Optimized for M3 MacBook")
+                    FeatureRow(icon: "lock.shield.fill", title: "Privacy-Focused", description: "Uses DuckDuckGo search")
+                    FeatureRow(icon: "brain.head.profile", title: "On-Device AI", description: "Apple Foundation Models")
+                }
+                .padding(.top)
+
+                // Settings Panel
+                if showSettings {
+                    settingsPanel
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+            .padding()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .animation(.easeInOut, value: showSettings)
+    }
+
+    // MARK: - Settings Panel
+    private var settingsPanel: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            HStack {
+                Text("Settings")
+                    .font(.headline)
                     .fontWeight(.semibold)
-
-                Text("Get concise AI-powered summaries of web results\nwithout draining your battery")
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
+                Spacer()
             }
 
-            VStack(alignment: .leading, spacing: 12) {
-                FeatureRow(icon: "bolt.fill", title: "Fast & Efficient", description: "Optimized for M3 MacBook")
-                FeatureRow(icon: "lock.shield.fill", title: "Privacy-Focused", description: "Uses DuckDuckGo search")
-                FeatureRow(icon: "brain.head.profile", title: "On-Device AI", description: "Apple NaturalLanguage framework")
+            Divider()
+
+            // Max Search Results
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Max Search Results")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxSearchResults)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxSearchResults) },
+                    set: { settings.maxSearchResults = Int($0) }
+                ), in: Double(AppSettings.maxSearchResultsRange.lowerBound)...Double(AppSettings.maxSearchResultsRange.upperBound), step: 1)
             }
-            .padding(.top)
+
+            // Temperature
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("AI Temperature")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(String(format: "%.2f", settings.temperature))
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: $settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
+            }
+
+            // Max Response Tokens
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Max Response Tokens")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxResponseTokens)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxResponseTokens) },
+                    set: { settings.maxResponseTokens = Int($0) }
+                ), in: Double(AppSettings.maxResponseTokensRange.lowerBound)...Double(AppSettings.maxResponseTokensRange.upperBound), step: 100)
+            }
+
+            // Max Scraping Characters
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Max Scraping Characters")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxScrapingCharacters)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxScrapingCharacters) },
+                    set: { settings.maxScrapingCharacters = Int($0) }
+                ), in: Double(AppSettings.maxScrapingCharactersRange.lowerBound)...Double(AppSettings.maxScrapingCharactersRange.upperBound), step: 500)
+            }
         }
         .padding()
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(12)
     }
 
     // MARK: - Empty State View
@@ -210,7 +308,7 @@ struct SearchView: View {
     private func performSearch() {
         Task {
             do {
-                searchResults = try await searchService.search(query: searchQuery)
+                searchResults = try await searchService.search(query: searchQuery, maxResults: settings.maxSearchResults)
                 errorMessage = nil
 
                 // Auto-generate summary for the first search
@@ -235,7 +333,14 @@ struct SearchView: View {
     }
 
     private func generateSummary() async {
-        await aiService.summarize(query: searchQuery, results: searchResults)
+        await aiService.summarize(
+            query: searchQuery,
+            results: searchResults,
+            maxScrapingResults: settings.maxSearchResults,
+            maxScrapingChars: settings.maxScrapingCharacters,
+            temperature: settings.temperature,
+            maxTokens: settings.maxResponseTokens
+        )
     }
 }
 

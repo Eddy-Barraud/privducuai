@@ -19,13 +19,13 @@ class AIService: ObservableObject {
     private var languageSession: LanguageModelSession?
 
     /// Summarize search results using Foundation Models or fallback to NLP
-    func summarize(query: String, results: [SearchResult]) async -> String {
+    func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000) async -> String {
         isSummarizing = true
         defer { isSummarizing = false }
 
         // Scrape content from top pages
         let urls = results.map { $0.url }
-        let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: 10)
+        let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
 
         // Combine scraped content with snippets
         var contextParts: [String] = []
@@ -41,14 +41,14 @@ class AIService: ObservableObject {
         let fullContext = contextParts.joined(separator: "\n\n---\n\n")
 
         // Try Foundation Models first, fallback to NLP if it fails
-        let summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results)
+        let summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results, temperature: temperature, maxTokens: maxTokens)
 
         self.summary = summary
         return summary
     }
 
     /// Generate summary using Apple Foundation Models
-    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult]) async -> String {
+    private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000) async -> String {
         do {
             // Create session with instructions if we don't have one
             if languageSession == nil {
@@ -88,8 +88,8 @@ class AIService: ObservableObject {
 
             // Configure generation options
             let options = GenerationOptions(
-                temperature: 0.3,
-                maximumResponseTokens: 1000
+                temperature: temperature,
+                maximumResponseTokens: maxTokens
             )
 
             // Generate the summary

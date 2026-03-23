@@ -24,7 +24,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Scrape content from a single URL
-    func scrapeContent(from urlString: String) async -> String? {
+    func scrapeContent(from urlString: String, maxCharacters: Int = 5000) async -> String? {
         guard let url = URL(string: urlString) else { return nil }
 
         do {
@@ -40,14 +40,14 @@ class WebScrapingService: ObservableObject {
             }
 
             // Extract text content from HTML
-            return extractTextFromHTML(html)
+            return extractTextFromHTML(html, maxCharacters: maxCharacters)
         } catch {
             return nil
         }
     }
 
     /// Scrape content from multiple URLs concurrently
-    func scrapeMultiplePages(urls: [String], limit: Int = 10) async -> [String: String] {
+    func scrapeMultiplePages(urls: [String], limit: Int = 10, maxCharacters: Int = 5000) async -> [String: String] {
         isScrapingContent = true
         defer { isScrapingContent = false }
 
@@ -57,7 +57,7 @@ class WebScrapingService: ObservableObject {
         await withTaskGroup(of: (String, String?).self) { group in
             for url in limitedURLs {
                 group.addTask {
-                    let content = await self.scrapeContent(from: url)
+                    let content = await self.scrapeContent(from: url, maxCharacters: maxCharacters)
                     return (url, content)
                 }
             }
@@ -73,7 +73,7 @@ class WebScrapingService: ObservableObject {
     }
 
     /// Extract readable text content from HTML
-    private func extractTextFromHTML(_ html: String) -> String {
+    private func extractTextFromHTML(_ html: String, maxCharacters: Int = 5000) -> String {
         var text = html
 
         // Remove script and style tags with their content
@@ -92,9 +92,9 @@ class WebScrapingService: ObservableObject {
         text = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
         text = text.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Limit to reasonable size (first 5000 characters to avoid token limits)
-        if text.count > 5000 {
-            text = String(text.prefix(5000))
+        // Limit to reasonable size (user-configured max characters to avoid token limits)
+        if text.count > maxCharacters {
+            text = String(text.prefix(maxCharacters))
         }
 
         return text

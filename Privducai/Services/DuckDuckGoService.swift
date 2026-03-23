@@ -25,7 +25,7 @@ class DuckDuckGoService: ObservableObject {
     }
 
     /// Search DuckDuckGo using their HTML API
-    func search(query: String) async throws -> [SearchResult] {
+    func search(query: String, maxResults: Int = 10) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
         isSearching = true
@@ -51,7 +51,7 @@ class DuckDuckGoService: ObservableObject {
 
         // Parse HTML results
         let results = try parseHTMLResults(from: data, query: query)
-        return Array(results.prefix(10)) // Limit to top 10 results for efficiency
+        return Array(results.prefix(maxResults)) // Limit to user-configured max results
     }
 
     /// Parse DuckDuckGo HTML response
