@@ -202,7 +202,7 @@ class AIService: ObservableObject {
             let response = try await session.respond(to: prompt, options: options)
             let txt_response = String(describing: response.content)
 
-            return finalSummary
+            return txt_response
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
             // Fallback to basic summarization
