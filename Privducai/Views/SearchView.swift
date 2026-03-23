@@ -96,7 +96,7 @@ struct SearchView: View {
             }
 
             HStack(spacing: 6) {
-                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 3000, skipPerPageSummary: true) }) {
+                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 1500) }) {
                     Label(
                         settings.language == .french ? "Rapide" : "Quick",
                         systemImage: "bolt.fill"
@@ -113,7 +113,7 @@ struct SearchView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(searchQuery.isEmpty || searchService.isSearching)
 
-                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 5000) }) {
+                Button(action: { performSearch(maxResults: 10, maxScrapingChars: 7000) }) {
                     Label(
                         settings.language == .french ? "Approfondi" : "Deep",
                         systemImage: "sparkle.magnifyingglass"
