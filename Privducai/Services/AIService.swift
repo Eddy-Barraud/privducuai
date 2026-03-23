@@ -202,13 +202,6 @@ class AIService: ObservableObject {
             let response = try await session.respond(to: prompt, options: options)
             let txt_response = String(describing: response.content)
 
-            // Add source links with language-appropriate header
-            let sourceHeader = language == .french ? "**Sources :**" : "**Sources:**"
-            var finalSummary = txt_response + "\n\n" + sourceHeader + "\n"
-            for (index, result) in results.prefix(5).enumerated() {
-                finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
-            }
-
             return finalSummary
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
