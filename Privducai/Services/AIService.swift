@@ -8,41 +8,15 @@
 import Foundation
 import Combine
 import NaturalLanguage
-#if canImport(FoundationModels)
 import FoundationModels
-#endif
 
 @MainActor
 class AIService: ObservableObject {
     @Published var isSummarizing = false
     @Published var summary: String = ""
-    /// Indicates if the Foundation Models framework is conditionally available
-    @Published var modelAvailable = false
 
     private let webScraper = WebScrapingService()
-
-    init() {
-        Task {
-            await checkModelAvailability()
-        }
-    }
-
-    /// Check if Foundation Models are available
-    private func checkModelAvailability() async {
-#if canImport(FoundationModels)
-        let availability = LanguageModel.availability
-        if availability == .available {
-            self.modelAvailable = true
-            print("✓ Foundation Models are available")
-        } else {
-            self.modelAvailable = false
-            print("⚠️ Foundation Models not available (status: \(availability)), using fallback summarization")
-        }
-#else
-        self.modelAvailable = false
-        print("⚠️ Foundation Models framework not available at compile time, using fallback summarization")
-#endif
-    }
+    private var languageSession: LanguageModelSession?
 
     /// Summarize search results using Foundation Models or fallback to NLP
     func summarize(query: String, results: [SearchResult]) async -> String {
@@ -66,13 +40,8 @@ class AIService: ObservableObject {
 
         let fullContext = contextParts.joined(separator: "\n\n---\n\n")
 
-        // Use Foundation Models if available, otherwise fallback
-        let summary: String
-        if modelAvailable {
-            summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results)
-        } else {
-            summary = await generateConciseSummary(query: query, context: fullContext, results: results)
-        }
+        // Try Foundation Models first, fallback to NLP if it fails
+        let summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results)
 
         self.summary = summary
         return summary
@@ -80,21 +49,30 @@ class AIService: ObservableObject {
 
     /// Generate summary using Apple Foundation Models
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult]) async -> String {
-#if canImport(FoundationModels)
         do {
-            let systemPrompt = """
-            You are a helpful AI assistant that provides concise, accurate summaries of web search results.
-            Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
+            // Create session with instructions if we don't have one
+            if languageSession == nil {
+                let instructions = """
+                You are a helpful AI assistant that provides concise, accurate summaries of web search results.
+                Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
 
-            Guidelines:
-            - Be concise but comprehensive
-            - Focus on the most relevant information
-            - Include key facts and details
-            - Maintain accuracy
-            - Use clear, easy-to-understand language
-            """
+                Guidelines:
+                - Be concise but comprehensive
+                - Focus on the most relevant information
+                - Include key facts and details
+                - Maintain accuracy
+                - Use clear, easy-to-understand language
+                """
 
-            let userPrompt = """
+                languageSession = LanguageModelSession(instructions: instructions)
+            }
+
+            guard let session = languageSession else {
+                return await generateConciseSummary(query: query, context: context, results: results)
+            }
+
+            // Prepare the prompt
+            let prompt = """
             User Query: \(query)
 
             Web Content:
@@ -108,22 +86,17 @@ class AIService: ObservableObject {
             Keep the summary under 300 words.
             """
 
-            // Construct a simple request; if your SDK uses different types, adjust accordingly
-            let request = LanguageModelRequest(
-                messages: [
-                    .init(role: .system, content: systemPrompt),
-                    .init(role: .user, content: userPrompt)
-                ]
+            // Configure generation options
+            let options = GenerationOptions(
+                temperature: 0.3,
+                maximumResponseTokens: 1000
             )
 
-            let response = try await LanguageModel.shared.perform(request)
+            // Generate the summary
+            let response = try await session.respond(to: prompt, options: options)
 
-            var generatedText = ""
-            if let firstChoice = response.choices.first {
-                generatedText = firstChoice.message.content
-            }
-
-            var finalSummary = generatedText + "\n\n**Sources:**\n"
+            // Add source links
+            var finalSummary = response + "\n\n**Sources:**\n"
             for (index, result) in results.prefix(5).enumerated() {
                 finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
             }
@@ -131,12 +104,9 @@ class AIService: ObservableObject {
             return finalSummary
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
+            // Fallback to basic summarization
             return await generateConciseSummary(query: query, context: context, results: results)
         }
-#else
-        // FoundationModels not available at compile time; fall back immediately
-        return await generateConciseSummary(query: query, context: context, results: results)
-#endif
     }
 
     /// Generate a concise summary with links

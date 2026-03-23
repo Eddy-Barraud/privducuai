@@ -129,12 +129,6 @@ struct SearchView: View {
                     .font(.headline)
                     .fontWeight(.semibold)
 
-                if aiService.modelAvailable {
-                    Text("• Foundation Models")
-                        .font(.caption)
-                        .foregroundColor(.green)
-                }
-
                 Spacer()
                 if aiService.isSummarizing {
                     ProgressView()
