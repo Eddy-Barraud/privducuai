@@ -146,7 +146,7 @@ class AIService: ObservableObject {
         // Add key findings
         if !topSentences.isEmpty {
             summaryParts.append("**Key Findings:**")
-            for (index, sentence) in topSentences.enumerated() {
+            for (_, sentence) in topSentences.enumerated() {
                 // Clean up the sentence
                 let cleaned = sentence
                     .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
