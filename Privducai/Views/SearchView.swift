@@ -20,6 +20,10 @@ struct SearchView: View {
     @State private var settings = AppSettings()
     @State private var showSettings = false
 
+    // Generation timer
+    @State private var summaryStartTime: Date? = nil
+    @State private var summaryElapsedSeconds: Double? = nil
+
     var body: some View {
         VStack(spacing: 0) {
             // Header
@@ -47,10 +51,10 @@ struct SearchView: View {
         HStack {
             Button(action: { goHome() }) {
                 HStack {
-                    Image(systemName: "magnifyingglass.circle.fill")
+                    Image(systemName: "arrow.2.circlepath")
                         .font(.system(size: 32))
                         .foregroundColor(.accentColor)
-                    Text("Duck Assist")
+                    Text("Search Assist")
                         .font(.title)
                         .fontWeight(.bold)
                 }
@@ -165,6 +169,19 @@ struct SearchView: View {
                 Text(LocalizedStringKey(aiService.summary))
                     .font(.body)
                     .foregroundColor(.primary)
+            }
+
+            // Generation time shown at the bottom-right once complete
+            if !aiService.isSummarizing, let elapsed = summaryElapsedSeconds {
+                HStack {
+                    Spacer()
+                    let label = settings.language == .french
+                        ? String(format: "Généré en %.1f s", elapsed)
+                        : String(format: "Generated in %.1f s", elapsed)
+                    Text(label)
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
         }
         .padding()
@@ -372,6 +389,8 @@ struct SearchView: View {
     }
 
     private func generateSummary() async {
+        summaryStartTime = Date()
+        summaryElapsedSeconds = nil
         _ = await aiService.summarize(
             query: searchQuery,
             results: searchResults,
@@ -381,6 +400,9 @@ struct SearchView: View {
             maxTokens: settings.maxResponseTokens,
             language: settings.language
         )
+        if let start = summaryStartTime {
+            summaryElapsedSeconds = Date().timeIntervalSince(start)
+        }
     }
 
     private func goHome() {
@@ -389,6 +411,8 @@ struct SearchView: View {
         showingSummary = false
         aiService.summary = ""
         errorMessage = nil
+        summaryStartTime = nil
+        summaryElapsedSeconds = nil
     }
 }
 

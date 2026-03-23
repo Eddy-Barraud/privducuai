@@ -16,8 +16,13 @@ class AIService: ObservableObject {
     @Published var summary: String = ""
 
     private let webScraper = WebScrapingService()
-    private var languageSession: LanguageModelSession?
-    private var currentLanguage: ModelLanguage?
+
+    // Apple on-device Foundation Models context window (tokens)
+    private static let contextWindowLimit = 4096
+    // Conservative chars-per-token estimate: French/European text averages ~3 chars per
+    // subword token which is more compact than the ~4 chars typical for English.  Using 3
+    // ensures we stay within budget for the denser language rather than the sparser one.
+    private static let avgCharsPerToken = 3
 
     /// Summarize search results using Foundation Models or fallback to NLP
     func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
@@ -28,27 +33,35 @@ class AIService: ObservableObject {
         let urls = results.map { $0.url }
         let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
 
-        // Calculate available tokens for per-page summaries
-        let contextWindowLimit = 4096
-        let instructionTokens = 100
-        let promptOverheadTokens = 80
-        let reservedTokens = instructionTokens + promptOverheadTokens + maxTokens
-        let availableTokens = max(contextWindowLimit - reservedTokens, 0)
-        let avgCharsPerToken = 3
-        
-        // Calculate tokens to allocate per page
-        let totalPossibleTokens = (maxScrapingResults * maxScrapingChars) / avgCharsPerToken
-        let tokensPerPage = max(100, (availableTokens * results.count) / max(1, totalPossibleTokens))
+        // Per-page summarization uses its own small response budget (2-3 sentence summaries).
+        // Compute content budget independently from the final-summary maxTokens setting so
+        // that a large maxTokens value doesn't unnecessarily shrink per-page content.
+        let pageResponseTokens = 150      // tokens reserved for each page summary response
+        let pageInstructionTokens = 40    // short per-page session instructions
+        let pagePromptOverheadTokens = 60 // query, title, labels in the per-page prompt
+        let pageContentAvailableTokens = max(
+            0,
+            AIService.contextWindowLimit - pageInstructionTokens - pagePromptOverheadTokens - pageResponseTokens
+        )
+        // Respect the user's maxScrapingChars setting; never exceed the token budget.
+        let pageMaxChars = min(maxScrapingChars, pageContentAvailableTokens * AIService.avgCharsPerToken)
 
-        // Summarize each scraped page individually, then combine summaries
+        // Summarize each scraped page individually with a fresh session per page,
+        // then combine the resulting short summaries for the final AI step.
         var summarizedParts: [String] = []
 
         for result in results {
             if let pageContent = scrapedContent[result.url] {
-                // Summarize individual page with calculated parameters
-                let pageMaxTokens = Int(tokensPerPage)
-                let pageMaxChars = availableTokens * avgCharsPerToken * 3 / 4  // Use 70% of available tokens for page content to allow for prompt overhead
-                let pageSummary = await summarizePage(content: pageContent, title: result.title, url: result.url, query: query, temperature: temperature, language: language, maxResponseTokens: pageMaxTokens, maxContentChars: pageMaxChars)
+                let pageSummary = await summarizePage(
+                    content: pageContent,
+                    title: result.title,
+                    url: result.url,
+                    query: query,
+                    temperature: temperature,
+                    language: language,
+                    maxResponseTokens: pageResponseTokens,
+                    maxContentChars: pageMaxChars
+                )
                 summarizedParts.append(pageSummary)
             } else {
                 // Use snippet if no full content was scraped
@@ -68,56 +81,57 @@ class AIService: ObservableObject {
     /// Generate summary using Apple Foundation Models
     private func generateSummaryWithFoundationModels(query: String, context: String, results: [SearchResult], temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french) async -> String {
         do {
-            // Create session with language-specific instructions if needed
-            if languageSession == nil || currentLanguage != language {
-                let instructions: String
-                
-                if language == .french {
-                    instructions = """
-                    Vous êtes un assistant IA utile qui fournit des résumés concis et précis des résultats de recherche web.
-                    Votre tâche est d'analyser le contenu web fourni et de générer un résumé clair et informatif qui répond directement à la requête de l'utilisateur.
+            // Always create a fresh session so that context from previous searches
+            // does not accumulate and overflow the context window.
+            let instructions: String
 
-                    Directives :
-                    - Soyez concis mais complet
-                    - Concentrez-vous sur les informations les plus pertinentes
-                    - Incluez les faits et détails clés
-                    - Maintenez la précision
-                    - Utilisez un langage clair et facile à comprendre
-                    """
-                } else {
-                    instructions = """
-                    You are a helpful AI assistant that provides concise, accurate summaries of web search results.
-                    Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
+            if language == .french {
+                instructions = """
+                Vous êtes un assistant IA utile qui fournit des résumés concis et précis des résultats de recherche web.
+                Votre tâche est d'analyser le contenu web fourni et de générer un résumé clair et informatif qui répond directement à la requête de l'utilisateur.
 
-                    Guidelines:
-                    - Be concise but comprehensive
-                    - Focus on the most relevant information
-                    - Include key facts and details
-                    - Maintain accuracy
-                    - Use clear, easy-to-understand language
-                    """
-                }
+                Directives :
+                - Soyez concis mais complet
+                - Concentrez-vous sur les informations les plus pertinentes
+                - Incluez les faits et détails clés
+                - Maintenez la précision
+                - Utilisez un langage clair et facile à comprendre
+                """
+            } else {
+                instructions = """
+                You are a helpful AI assistant that provides concise, accurate summaries of web search results.
+                Your task is to analyze the provided web content and generate a clear, informative summary that directly answers the user's query.
 
-                languageSession = LanguageModelSession(instructions: instructions)
-                currentLanguage = language
+                Guidelines:
+                - Be concise but comprehensive
+                - Focus on the most relevant information
+                - Include key facts and details
+                - Maintain accuracy
+                - Use clear, easy-to-understand language
+                """
             }
 
-            guard let session = languageSession else {
-                return await generateConciseSummary(query: query, context: context, results: results)
-            }
+            let session = LanguageModelSession(instructions: instructions)
 
-            // Handle context window limit by selecting most relevant summaries
-            // Reserve tokens for the session instructions (~100 tokens), prompt template
-            // overhead – query, labels, closing instructions (~80 tokens) – and the response.
+            // Token budget for the final summary.
             // Apple on-device Foundation Models have a context window of ~4096 tokens.
-            let contextWindowLimit = 4096
-            let instructionTokens = 100  // estimated tokens consumed by the LanguageModelSession instructions
-            let promptOverheadTokens = 80  // estimated tokens for query label, section headers, and closing instructions
-            let reservedTokens = instructionTokens + promptOverheadTokens + maxTokens
-            let availableTokens = max(contextWindowLimit - reservedTokens, 0)
-            // 1 token ≈ 3 characters is a common approximation for French text with subword tokenisers.
-            let avgCharsPerToken = 3  // Adjusted for potentially more compact languages like French
-            let maxContextChars = availableTokens * avgCharsPerToken
+            // Tokens consumed by: session instructions (~100), prompt template overhead –
+            // query label, section headers, closing instructions (~80), and the response.
+            let instructionTokens = 100
+            let promptOverheadTokens = 80
+            // Ensure maxTokens never crowds out context entirely: reserve at least 300 tokens
+            // for the combined page summaries so the model has something to work with.
+            let minContextTokens = 300
+            let effectiveMaxTokens = min(
+                maxTokens,
+                AIService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
+            )
+            let reservedTokens = instructionTokens + promptOverheadTokens + effectiveMaxTokens
+            // Apply a 20 % utilization buffer on top of the char-per-token estimate to
+            // absorb tokeniser variance (French and other languages can be denser than English).
+            let utilizationFactor = 0.8
+            let availableTokens = max(AIService.contextWindowLimit - reservedTokens, 0)
+            let maxContextChars = Int(Double(availableTokens * AIService.avgCharsPerToken) * utilizationFactor)
             
             // If context fits, use it all; otherwise intelligently select summaries
             var selectedContext: String
@@ -178,24 +192,17 @@ class AIService: ObservableObject {
                 """
             }
 
-            // Configure generation options
+            // Configure generation options using the effective (clamped) token limit
             let options = GenerationOptions(
                 temperature: temperature,
-                maximumResponseTokens: maxTokens
+                maximumResponseTokens: effectiveMaxTokens
             )
 
             // Generate the summary
             let response = try await session.respond(to: prompt, options: options)
             let txt_response = String(describing: response.content)
 
-            // Add source links with language-appropriate header
-            let sourceHeader = language == .french ? "**Sources :**" : "**Sources:**"
-            var finalSummary = txt_response + "\n\n" + sourceHeader + "\n"
-            for (index, result) in results.prefix(5).enumerated() {
-                finalSummary += "\(index + 1). [\(result.title)](\(result.url))\n"
-            }
-
-            return finalSummary
+            return txt_response
         } catch {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
             // Fallback to basic summarization
@@ -206,10 +213,15 @@ class AIService: ObservableObject {
     /// Summarize a single page content
     private func summarizePage(content: String, title: String, url: String, query: String, temperature: Double = 0.3, language: ModelLanguage = .french, maxResponseTokens: Int = 150, maxContentChars: Int = 2000) async -> String {
         do {
-            guard let session = languageSession else {
-                // Fallback: extract key sentences from the page
-                return "Source: \(title)\nURL: \(url)\nContent: \(content.prefix(500))..."
+            // Create a fresh session for every page so that successive page calls within
+            // one search do not accumulate history and overflow the context window.
+            let pageInstructions: String
+            if language == .french {
+                pageInstructions = "Vous êtes un assistant qui résume brièvement le contenu de pages web en 2-3 phrases."
+            } else {
+                pageInstructions = "You are an assistant that briefly summarizes web page content in 2-3 sentences."
             }
+            let session = LanguageModelSession(instructions: pageInstructions)
 
             // Prepare a prompt to summarize this specific page
             let pageSummaryPrompt: String

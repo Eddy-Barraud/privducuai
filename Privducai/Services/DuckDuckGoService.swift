@@ -8,6 +8,54 @@
 import Foundation
 import Combine
 
+/// Strip HTML tags and decode common HTML entities from a raw HTML string.
+private func htmlToPlainText(_ html: String) -> String {
+    // Remove all HTML tags
+    var result = html
+    if let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) {
+        result = regex.stringByReplacingMatches(
+            in: result,
+            range: NSRange(result.startIndex..., in: result),
+            withTemplate: ""
+        )
+    }
+    // Decode HTML entities
+    let entities: [(String, String)] = [
+        ("&amp;",  "&"),
+        ("&lt;",   "<"),
+        ("&gt;",   ">"),
+        ("&quot;", "\""),
+        ("&#x27;", "'"),
+        ("&#39;",  "'"),
+        ("&apos;", "'"),
+        ("&nbsp;", " "),
+        ("&mdash;", "—"),
+        ("&ndash;", "–"),
+        ("&hellip;", "…"),
+        ("&laquo;", "«"),
+        ("&raquo;", "»"),
+    ]
+    for (entity, char) in entities {
+        result = result.replacingOccurrences(of: entity, with: char)
+    }
+    // Decode numeric decimal entities like &#8230;
+    if let numericRegex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
+        let matches = numericRegex.matches(
+            in: result,
+            range: NSRange(result.startIndex..., in: result)
+        ).reversed()
+        for match in matches {
+            if let range = Range(match.range(at: 1), in: result),
+               let codePoint = Int(result[range]),
+               let scalar = Unicode.Scalar(codePoint) {
+                let fullRange = Range(match.range, in: result)!
+                result = result.replacingCharacters(in: fullRange, with: String(scalar))
+            }
+        }
+    }
+    return result.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 @MainActor
 class DuckDuckGoService: ObservableObject {
     @Published var isSearching = false
@@ -81,20 +129,14 @@ class DuckDuckGoService: ObservableObject {
                   let titleEnd = component.range(of: "</a>", range: titleStart.upperBound..<component.endIndex) else {
                 continue
             }
-            let title = String(component[titleStart.upperBound..<titleEnd.lowerBound])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .replacingOccurrences(of: "<b>", with: "")
-                .replacingOccurrences(of: "</b>", with: "")
+            let title = htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
 
             // Extract snippet
             var snippet = ""
             if let snippetRange = component.range(of: "class=\"result__snippet\""),
                let snippetStart = component.range(of: ">", range: snippetRange.upperBound..<component.endIndex),
                let snippetEnd = component.range(of: "</", range: snippetStart.upperBound..<component.endIndex) {
-                snippet = String(component[snippetStart.upperBound..<snippetEnd.lowerBound])
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .replacingOccurrences(of: "<b>", with: "")
-                    .replacingOccurrences(of: "</b>", with: "")
+                snippet = htmlToPlainText(String(component[snippetStart.upperBound..<snippetEnd.lowerBound]))
             }
 
             // Clean up URL (DuckDuckGo redirects)
