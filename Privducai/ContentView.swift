@@ -243,7 +243,7 @@ private final class ChatService: ObservableObject {
 
     // Apple Foundation Models practical context window budget used in this app.
     // Context is always selected/truncated to fit this limit before generation.
-    // This aligns with the 4096-token window already enforced in AIService.
+    // This aligns with the 4096-token window policy used across app generation flows.
     private static let contextWindowLimit = 4096
     // Conservative estimate to keep selected text under token limits across mixed languages.
     private static let avgCharsPerToken = 3
@@ -398,14 +398,14 @@ private final class ChatService: ObservableObject {
         var selected: [String] = []
         var currentChars = 0
 
-        for entry in ranked {
-            let chunk = entry.chunk
-            let entry = "Source: \(chunk.source)\n\(chunk.text)"
-            if currentChars + entry.count > maxContextChars {
+        for rankedChunk in ranked {
+            let chunk = rankedChunk.chunk
+            let chunkEntry = "Source: \(chunk.source)\n\(chunk.text)"
+            if currentChars + chunkEntry.count > maxContextChars {
                 continue
             }
-            selected.append(entry)
-            currentChars += entry.count
+            selected.append(chunkEntry)
+            currentChars += chunkEntry.count
         }
 
         if selected.isEmpty, let first = ranked.first {
