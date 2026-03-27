@@ -1,5 +1,7 @@
 # Privducai
 
+[![Build Status](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml/badge.svg)](https://github.com/eddybarraud/Privducai/actions/workflows/build.yml)
+
 A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
 The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.
 
@@ -173,6 +175,20 @@ This project is licensed under the **Privducai Non-Commercial License v1.0**.
 **For Commercial Use**: Contact the licensor to obtain a commercial license.
 
 See [LICENSE](LICENSE) file for full terms and conditions.
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on:
+- Setting up your development environment
+- Writing code that fits the project
+- Submitting pull requests
+- Reporting issues
+
+Quick start:
+```bash
+git clone https://github.com/eddybarraud/Privducai.git
+./scripts/build.sh Debug
+```
 
 ## Credits
 

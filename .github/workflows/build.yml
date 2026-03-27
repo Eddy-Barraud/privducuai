@@ -1,0 +1,45 @@
+name: Build Privducai
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Select Xcode
+      run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+    
+    - name: Xcode Version
+      run: xcodebuild -version
+    
+    - name: Build Debug
+      run: |
+        xcodebuild \
+          -project Privducai.xcodeproj \
+          -scheme Privducai \
+          -configuration Debug \
+          -destination "generic/platform=macOS" \
+          build
+    
+    - name: Build Release
+      run: |
+        xcodebuild \
+          -project Privducai.xcodeproj \
+          -scheme Privducai \
+          -configuration Release \
+          -destination "generic/platform=macOS" \
+          build
+    
+    - name: Upload Build Logs
+      if: failure()
+      uses: actions/upload-artifact@v3
+      with:
+        name: build-logs
+        path: /tmp/build.log
