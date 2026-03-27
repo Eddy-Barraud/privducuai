@@ -243,16 +243,37 @@ struct ChatView: View {
 
     /// Handles dropped file providers and keeps PDF URLs only.
     private func handlePDFDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
+        debugDrop("Received drop with \(providers.count) providers at rowIndex=\(String(describing: rowIndex))")
+        for (index, provider) in providers.enumerated() {
+            debugDrop("Provider[\(index)] registeredTypeIdentifiers=\(provider.registeredTypeIdentifiers)")
+        }
         let pdfProviders = providers.filter {
             $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
             || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
-        guard !pdfProviders.isEmpty else { return false }
+        debugDrop("Filtered \(pdfProviders.count) candidate PDF providers")
+        guard !pdfProviders.isEmpty else {
+            debugDrop("Drop ignored: no provider conforms to public.pdf or public.file-url")
+            return false
+        }
 
-        for provider in pdfProviders {
+        for (index, provider) in pdfProviders.enumerated() {
             if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
-                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
-                    guard let url, let persistentURL = persistDroppedPDF(url) else { return }
+                debugDrop("Provider[\(index)] loading file representation for public.pdf")
+                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, error in
+                    if let error {
+                        debugDrop("Provider[\(index)] loadFileRepresentation error: \(error.localizedDescription)")
+                    }
+                    guard let url else {
+                        debugDrop("Provider[\(index)] loadFileRepresentation returned nil URL")
+                        return
+                    }
+                    debugDrop("Provider[\(index)] loadFileRepresentation url=\(url.path)")
+                    guard let persistentURL = persistDroppedPDF(url) else {
+                        debugDrop("Provider[\(index)] failed to persist dropped PDF at \(url.path)")
+                        return
+                    }
+                    debugDrop("Provider[\(index)] persisted dropped PDF at \(persistentURL.path)")
                     Task { @MainActor in
                         insertPDFSource(persistentURL, at: rowIndex)
                     }
@@ -260,7 +281,12 @@ struct ChatView: View {
                 continue
             }
 
-            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+            debugDrop("Provider[\(index)] loading item for public.file-url")
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, error in
+                if let error {
+                    debugDrop("Provider[\(index)] loadItem error: \(error.localizedDescription)")
+                }
+                debugDrop("Provider[\(index)] loadItem returned itemType=\(item.map { String(describing: type(of: $0)) } ?? "nil")")
                 let fileURL: URL?
                 if let data = item as? Data {
                     fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
@@ -274,8 +300,10 @@ struct ChatView: View {
                 guard let fileURL,
                       fileURL.pathExtension.lowercased() == "pdf",
                       let persistentURL = persistDroppedPDF(fileURL) else {
+                    debugDrop("Provider[\(index)] rejected dropped item; resolvedURL=\(fileURL?.path ?? "nil"), ext=\(fileURL?.pathExtension ?? "nil")")
                     return
                 }
+                debugDrop("Provider[\(index)] persisted file-url dropped PDF at \(persistentURL.path)")
 
                 Task { @MainActor in
                     insertPDFSource(persistentURL, at: rowIndex)
@@ -301,8 +329,10 @@ struct ChatView: View {
                 try fileManager.removeItem(at: destinationURL)
             }
             try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            debugDrop("Copied dropped PDF from \(sourceURL.path) to \(destinationURL.path)")
             return destinationURL
         } catch {
+            debugDrop("Failed to persist dropped PDF from \(sourceURL.path): \(error.localizedDescription)")
             return nil
         }
     }
@@ -325,23 +355,35 @@ struct ChatView: View {
 
     /// Inserts a PDF source while keeping URL placeholder behavior.
     private func insertPDFSource(_ url: URL, at rowIndex: Int?) {
-        guard url.pathExtension.lowercased() == "pdf" else { return }
+        guard url.pathExtension.lowercased() == "pdf" else {
+            debugDrop("Ignoring non-PDF URL during insert: \(url.path)")
+            return
+        }
         guard !contextSources.contains(where: { source in
             if case .pdf(let existingURL) = source.kind {
                 return existingURL == url
             }
             return false
         }) else {
+            debugDrop("Ignoring duplicate PDF context URL: \(url.path)")
             return
         }
 
         if let rowIndex, contextSources.indices.contains(rowIndex) {
             contextSources[rowIndex].kind = .pdf(url: url)
+            debugDrop("Inserted dropped PDF into existing context row \(rowIndex): \(url.lastPathComponent)")
         } else {
             contextSources.append(ContextSource(kind: .pdf(url: url)))
+            debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
         }
         normalizeContextSources()
         scheduleContextPreanalysis()
+    }
+
+    private func debugDrop(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[ChatView][PDFDrop] \(message())")
+        #endif
     }
 
     /// Appends multiple PDFs.
