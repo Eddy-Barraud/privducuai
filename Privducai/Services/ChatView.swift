@@ -44,7 +44,9 @@ struct ChatView: View {
             allowsMultipleSelection: true
         ) { result in
             guard case .success(let urls) = result else { return }
-            appendPDFSources(urls)
+            Task { @MainActor in
+                appendPDFSources(urls)
+            }
         }
         .onAppear {
             mergeSharedInputsIfNeeded()
@@ -246,11 +248,17 @@ struct ChatView: View {
 
         for provider in pdfProviders {
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                guard let data = item as? Data,
-                      let fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?,
-                      fileURL.pathExtension.lowercased() == "pdf" else {
-                    return
+                let fileURL: URL?
+                if let data = item as? Data {
+                    fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
+                } else if let url = item as? URL {
+                    fileURL = url
+                } else if let nsURL = item as? NSURL {
+                    fileURL = nsURL as URL
+                } else {
+                    fileURL = nil
                 }
+                guard let fileURL, fileURL.pathExtension.lowercased() == "pdf" else { return }
 
                 Task { @MainActor in
                     insertPDFSource(fileURL, at: rowIndex)

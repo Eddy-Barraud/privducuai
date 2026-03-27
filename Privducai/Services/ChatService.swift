@@ -9,6 +9,7 @@ import Foundation
 import Combine
 import FoundationModels
 import PDFKit
+import NaturalLanguage
 
 /// Service layer that orchestrates retrieval-augmented chat generation.
 @MainActor
@@ -62,10 +63,7 @@ final class ChatService: ObservableObject {
         )
 
         do {
-            let instructions = """
-            You are a helpful chat assistant. Answer the user clearly and accurately.
-            Use retrieved context when relevant and mention uncertainty when context is insufficient.
-            """
+            let instructions = buildInstructions(for: message)
             let session = LanguageModelSession(instructions: instructions)
             let prompt = buildPrompt(for: message, selectedContext: selected.selectedContext)
             let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
@@ -259,6 +257,27 @@ final class ChatService: ObservableObject {
             }
         }
         return content
+    }
+
+    /// Builds dynamic chat instructions matching the user's query language.
+    private func buildInstructions(for userMessage: String) -> String {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(userMessage)
+        let language = recognizer.dominantLanguage
+
+        if language == .french {
+            return """
+            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
+            Utilisez le contexte récupéré lorsqu'il est pertinent et indiquez vos incertitudes si le contexte est insuffisant.
+            Répondez dans la même langue que la question de l'utilisateur (ici: français).
+            """
+        }
+
+        return """
+        You are a helpful chat assistant. Answer the user clearly and accurately.
+        Use retrieved context when relevant and mention uncertainty when context is insufficient.
+        Respond in the same language as the user's latest question.
+        """
     }
 }
 
