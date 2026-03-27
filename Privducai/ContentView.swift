@@ -80,7 +80,7 @@ private struct ChatView: View {
         ) { result in
             guard case .success(let urls) = result else { return }
             selectedPDFs.append(contentsOf: urls)
-            selectedPDFs = Array(Set(selectedPDFs)).sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+            selectedPDFs = deduplicateAndSortPDFs(selectedPDFs)
         }
     }
 
@@ -219,12 +219,16 @@ private struct ChatView: View {
 
                 Task { @MainActor in
                     selectedPDFs.append(fileURL)
-                    selectedPDFs = Array(Set(selectedPDFs)).sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+                    selectedPDFs = deduplicateAndSortPDFs(selectedPDFs)
                 }
             }
         }
 
         return true
+    }
+
+    private func deduplicateAndSortPDFs(_ urls: [URL]) -> [URL] {
+        Array(Set(urls)).sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
     }
 }
 
@@ -374,12 +378,7 @@ private final class ChatService: ObservableObject {
             return "No additional context provided."
         }
 
-        let effectiveResponseTokens = min(
-            maxResponseTokens,
-            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
-        )
-        let availableTokens = max(Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - effectiveResponseTokens, 0)
-        let maxContextChars = Int(Double(availableTokens * Self.avgCharsPerToken) * Self.contextUtilizationFactor)
+        let maxContextChars = calculateMaxContextCharacters(maxResponseTokens: maxResponseTokens)
 
         let ranked = chunks
             .map { chunk in
@@ -387,7 +386,7 @@ private final class ChatService: ObservableObject {
             }
             .sorted { lhs, rhs in
                 if lhs.1 == rhs.1 {
-                    return lhs.0.text.count < rhs.0.text.count
+                    return lhs.0.text.count > rhs.0.text.count
                 }
                 return lhs.1 > rhs.1
             }
@@ -410,6 +409,15 @@ private final class ChatService: ObservableObject {
         }
 
         return selected.joined(separator: "\n\n---\n\n")
+    }
+
+    private func calculateMaxContextCharacters(maxResponseTokens: Int) -> Int {
+        let effectiveResponseTokens = min(
+            maxResponseTokens,
+            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
+        )
+        let availableTokens = max(Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - effectiveResponseTokens, 0)
+        return Int(Double(availableTokens * Self.avgCharsPerToken) * Self.contextUtilizationFactor)
     }
 
     private func relevanceScore(text: String, query: String) -> Double {
@@ -475,6 +483,8 @@ private struct RAGChunk: Identifiable {
 
 private struct RAGChunker {
     private static let avgCharsPerToken = 3
+    // Keep chunks large enough to carry coherent information for retrieval.
+    private static let minimumChunkCharacters = 200
 
     func chunk(text: String, source: String, maxChunkTokens: Int, overlapTokens: Int) -> [RAGChunk] {
         let cleanText = text
@@ -483,7 +493,7 @@ private struct RAGChunker {
 
         guard !cleanText.isEmpty else { return [] }
 
-        let maxChunkChars = max(200, maxChunkTokens * Self.avgCharsPerToken)
+        let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
         let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
         let stride = max(1, maxChunkChars - overlapChars)
 
