@@ -197,7 +197,7 @@ enum RAGCitationFormatter {
         guard !chunks.isEmpty else { return "" }
 
         let isFrench = language == .french
-        let title = isFrench ? "Top 3 extraits pertinents :" : "Top 3 relevant chunks:"
+        let title = isFrench ? "\n\nTop 3 extraits pertinents :" : "\n\nTop 3 relevant chunks:"
         let urlLabel = "URL"
         let pageLabel = isFrench ? "Page PDF" : "PDF Page"
 
