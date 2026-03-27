@@ -18,6 +18,8 @@ struct ContentView: View {
     }
 
     @State private var selectedTab: AppTab = .searchAssist
+    @Binding var sharedURLs: [String]
+    @Binding var sharedPDFs: [URL]
 
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
@@ -37,15 +39,25 @@ struct ContentView: View {
                 case .searchAssist:
                     SearchView()
                 case .chat:
-                    ChatView()
+                    ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onChange(of: sharedURLs) {
+            if !sharedURLs.isEmpty {
+                selectedTab = .chat
+            }
+        }
+        .onChange(of: sharedPDFs) {
+            if !sharedPDFs.isEmpty {
+                selectedTab = .chat
+            }
         }
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(sharedURLs: .constant([]), sharedPDFs: .constant([]))
         .frame(width: 900, height: 700)
 }

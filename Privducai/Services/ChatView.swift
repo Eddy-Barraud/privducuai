@@ -11,13 +11,15 @@ import UniformTypeIdentifiers
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
+    @Binding var sharedURLs: [String]
+    @Binding var sharedPDFs: [URL]
+
     @StateObject private var chatService = ChatService()
 
     @State private var messageInput = ""
-    @State private var contextInput = ""
-    @State private var selectedPDFs: [URL] = []
-    @State private var isDropTargeted = false
     @State private var showFileImporter = false
+    @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
+    @State private var preanalysisTask: Task<Void, Never>?
 
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
@@ -34,8 +36,6 @@ struct ChatView: View {
             composerView
 
             contextBoxView
-
-            dropAreaView
         }
         .padding()
         .fileImporter(
@@ -44,8 +44,16 @@ struct ChatView: View {
             allowsMultipleSelection: true
         ) { result in
             guard case .success(let urls) = result else { return }
-            selectedPDFs.append(contentsOf: urls)
-            selectedPDFs = deduplicateAndSortPDFs(selectedPDFs)
+            appendPDFSources(urls)
+        }
+        .onAppear {
+            mergeSharedInputsIfNeeded()
+        }
+        .onChange(of: sharedURLs) {
+            mergeSharedInputsIfNeeded()
+        }
+        .onChange(of: sharedPDFs) {
+            mergeSharedInputsIfNeeded()
         }
     }
 
@@ -118,48 +126,93 @@ struct ChatView: View {
     /// Renders optional free-form context and selected PDF labels.
     private var contextBoxView: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Context")
-                .font(.subheadline)
-                .fontWeight(.semibold)
-
-            TextEditor(text: $contextInput)
-                .frame(minHeight: 80, maxHeight: 120)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                )
-
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: chatService.isAnalyzingContext ? "arrow.triangle.2.circlepath.circle.fill" : "arrow.triangle.2.circlepath.circle")
+                    .foregroundColor(chatService.isAnalyzingContext ? .accentColor : .secondary)
+                    .symbolEffect(.rotate.byLayer, isActive: chatService.isAnalyzingContext)
+                Text("Context Sources")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button {
+                    contextSources.append(ContextSource(kind: .url(text: "")))
+                } label: {
+                    Image(systemName: "plus.circle.fill")
+                }
+                .buttonStyle(.plain)
                 Button("Add PDF") {
                     showFileImporter = true
                 }
                 .buttonStyle(.bordered)
+            }
 
-                if !selectedPDFs.isEmpty {
-                    Text(selectedPDFs.map(\.lastPathComponent).joined(separator: ", "))
+            ForEach(Array(contextSources.enumerated()), id: \.element.id) { index, source in
+                contextRow(source: source, at: index)
+            }
+
+            if chatService.isAnalyzingContext {
+                HStack(spacing: 8) {
+                    ProgressView(value: chatService.contextAnalysisProgress)
+                        .controlSize(.small)
+                    Text("Analyzing sources…")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                        .lineLimit(2)
                 }
             }
         }
     }
 
-    /// Renders drag-and-drop area for PDF context files.
-    private var dropAreaView: some View {
-        RoundedRectangle(cornerRadius: 10)
-            .strokeBorder(
-                isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.4),
-                style: StrokeStyle(lineWidth: 1.5, dash: [6])
-            )
-            .background(Color(NSColor.controlBackgroundColor).opacity(0.4))
-            .frame(height: 56)
-            .overlay(
-                Text("Drop PDF here to add context")
-                    .font(.caption)
+    /// Renders a single editable source row.
+    private func contextRow(source: ContextSource, at index: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: source.kindSymbol)
+                .foregroundColor(source.kindColor)
+            switch source.kind {
+            case .url:
+                TextField(
+                    index == 0 ? "Paste URL or drop PDF here" : "Paste URL",
+                    text: Binding(
+                        get: {
+                            guard case .url(let text) = contextSources[index].kind else { return "" }
+                            return text
+                        },
+                        set: { newValue in
+                            contextSources[index].kind = .url(text: newValue)
+                            scheduleContextPreanalysis()
+                        }
+                    )
+                )
+                .textFieldStyle(.roundedBorder)
+            case .pdf:
+                if case .pdf(let url) = source.kind {
+                    Text(url?.lastPathComponent ?? "PDF")
+                        .lineLimit(1)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+            }
+            Button {
+                contextSources.remove(at: index)
+                if contextSources.isEmpty {
+                    contextSources = [ContextSource(kind: .url(text: ""))]
+                }
+                scheduleContextPreanalysis()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
                     .foregroundColor(.secondary)
-            )
-            .onDrop(of: [.fileURL], isTargeted: $isDropTargeted, perform: handlePDFDrop)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(8)
+        .background(Color(NSColor.textBackgroundColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+        )
+        .cornerRadius(8)
+        .onDrop(of: [.fileURL], isTargeted: nil) { providers in
+            handlePDFDrop(providers, rowIndex: index)
+        }
     }
 
     /// Validates and dispatches the current text input to the chat service.
@@ -169,6 +222,17 @@ struct ChatView: View {
 
         let message = trimmed
         messageInput = ""
+        let contextInput = contextSources
+            .compactMap { source -> String? in
+                guard case .url(let text) = source.kind else { return nil }
+                let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmedText.isEmpty ? nil : trimmedText
+            }
+            .joined(separator: "\n")
+        let selectedPDFs = contextSources.compactMap { source -> URL? in
+            guard case .pdf(let url) = source.kind else { return nil }
+            return url
+        }
 
         Task {
             await chatService.sendMessage(message, contextInput: contextInput, pdfURLs: selectedPDFs)
@@ -176,7 +240,7 @@ struct ChatView: View {
     }
 
     /// Handles dropped file providers and keeps PDF URLs only.
-    private func handlePDFDrop(_ providers: [NSItemProvider]) -> Bool {
+    private func handlePDFDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
         let pdfProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
         guard !pdfProviders.isEmpty else { return false }
 
@@ -189,8 +253,7 @@ struct ChatView: View {
                 }
 
                 Task { @MainActor in
-                    selectedPDFs.append(fileURL)
-                    selectedPDFs = deduplicateAndSortPDFs(selectedPDFs)
+                    insertPDFSource(fileURL, at: rowIndex)
                 }
             }
         }
@@ -198,8 +261,105 @@ struct ChatView: View {
         return true
     }
 
-    /// Deduplicates dropped/imported PDFs and sorts them by displayed filename.
-    private func deduplicateAndSortPDFs(_ urls: [URL]) -> [URL] {
-        Array(Set(urls)).sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+    /// Adds incoming shared URLs/PDFs to context rows once.
+    private func mergeSharedInputsIfNeeded() {
+        if !sharedURLs.isEmpty {
+            for url in sharedURLs where !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                contextSources.append(ContextSource(kind: .url(text: url)))
+            }
+            sharedURLs.removeAll()
+        }
+        if !sharedPDFs.isEmpty {
+            appendPDFSources(sharedPDFs)
+            sharedPDFs.removeAll()
+        }
+        normalizeContextSources()
+        scheduleContextPreanalysis()
+    }
+
+    /// Inserts a PDF source while keeping URL placeholder behavior.
+    private func insertPDFSource(_ url: URL, at rowIndex: Int?) {
+        guard url.pathExtension.lowercased() == "pdf" else { return }
+        guard !contextSources.contains(where: { source in
+            if case .pdf(let existingURL) = source.kind {
+                return existingURL == url
+            }
+            return false
+        }) else {
+            return
+        }
+
+        if let rowIndex, contextSources.indices.contains(rowIndex) {
+            contextSources[rowIndex].kind = .pdf(url: url)
+        } else {
+            contextSources.append(ContextSource(kind: .pdf(url: url)))
+        }
+        normalizeContextSources()
+        scheduleContextPreanalysis()
+    }
+
+    /// Appends multiple PDFs.
+    private func appendPDFSources(_ urls: [URL]) {
+        for url in urls {
+            insertPDFSource(url, at: nil)
+        }
+    }
+
+    /// Ensures there is always one empty URL row available.
+    private func normalizeContextSources() {
+        let hasEmptyURLRow = contextSources.contains { source in
+            if case .url(let text) = source.kind {
+                return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+            return false
+        }
+        if !hasEmptyURLRow {
+            contextSources.append(ContextSource(kind: .url(text: "")))
+        }
+    }
+
+    /// Triggers background context analysis shortly after edits.
+    private func scheduleContextPreanalysis() {
+        preanalysisTask?.cancel()
+        let contextInput = contextSources
+            .compactMap { source -> String? in
+                guard case .url(let text) = source.kind else { return nil }
+                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
+            .joined(separator: "\n")
+        let selectedPDFs = contextSources.compactMap { source -> URL? in
+            guard case .pdf(let url) = source.kind else { return nil }
+            return url
+        }
+        preanalysisTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            await chatService.preAnalyzeContext(contextInput: contextInput, pdfURLs: selectedPDFs)
+        }
+    }
+}
+
+private struct ContextSource: Identifiable {
+    enum Kind {
+        case url(text: String)
+        case pdf(url: URL?)
+    }
+
+    let id = UUID()
+    var kind: Kind
+
+    var kindSymbol: String {
+        switch kind {
+        case .url: return "link"
+        case .pdf: return "doc.richtext"
+        }
+    }
+
+    var kindColor: Color {
+        switch kind {
+        case .url: return .blue
+        case .pdf: return .red
+        }
     }
 }

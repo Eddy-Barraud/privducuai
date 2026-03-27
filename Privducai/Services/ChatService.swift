@@ -16,6 +16,8 @@ final class ChatService: ObservableObject {
     @Published var messages: [ChatMessage] = []
     @Published var isResponding = false
     @Published var errorMessage: String?
+    @Published var isAnalyzingContext = false
+    @Published var contextAnalysisProgress = 0.0
 
     private let webScraper = WebScrapingService()
     private let ragChunker = RAGChunker()
@@ -55,6 +57,8 @@ final class ChatService: ObservableObject {
     private static let embeddingInputCharacterLimit = 1800
 
     private var embeddingCache: [String: [Double]] = [:]
+    private var preAnalyzedContextKey: String?
+    private var preAnalyzedChunks: [RAGChunk] = []
 
     /// Sends a user message and appends the assistant response.
     func sendMessage(_ message: String, contextInput: String, pdfURLs: [URL]) async {
@@ -64,7 +68,15 @@ final class ChatService: ObservableObject {
         isResponding = true
         defer { isResponding = false }
 
-        let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
+        let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
+        let chunks: [RAGChunk]
+        if contextKey == preAnalyzedContextKey {
+            chunks = preAnalyzedChunks
+        } else {
+            chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
+            preAnalyzedContextKey = contextKey
+            preAnalyzedChunks = chunks
+        }
         let selectedContext = await selectContext(chunks: chunks, query: message, maxResponseTokens: Self.chatResponseTokens)
 
         do {
@@ -84,11 +96,44 @@ final class ChatService: ObservableObject {
         }
     }
 
+    /// Pre-analyzes context in the background so send-time latency remains low.
+    func preAnalyzeContext(contextInput: String, pdfURLs: [URL]) async {
+        let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
+        if contextKey.isEmpty {
+            preAnalyzedContextKey = nil
+            preAnalyzedChunks = []
+            isAnalyzingContext = false
+            contextAnalysisProgress = 0
+            return
+        }
+        if contextKey == preAnalyzedContextKey { return }
+
+        isAnalyzingContext = true
+        contextAnalysisProgress = 0
+        let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs, reportProgress: true)
+        preAnalyzedContextKey = contextKey
+        preAnalyzedChunks = chunks
+    }
+
     /// Collects web and PDF chunks from provided context.
-    private func collectChunks(contextInput: String, pdfURLs: [URL]) async -> [RAGChunk] {
+    private func collectChunks(contextInput: String, pdfURLs: [URL], reportProgress: Bool = false) async -> [RAGChunk] {
         var chunks: [RAGChunk] = []
+        if reportProgress {
+            isAnalyzingContext = true
+            contextAnalysisProgress = 0
+        }
+        defer {
+            if reportProgress {
+                contextAnalysisProgress = 1
+                isAnalyzingContext = false
+            }
+        }
 
         let urls = extractURLs(from: contextInput)
+        let uniquePDFs = Array(Set(pdfURLs))
+        let totalWorkItems = max(urls.count + uniquePDFs.count, 1)
+        var completedWorkItems = 0
+
         if !urls.isEmpty {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
@@ -104,10 +149,14 @@ final class ChatService: ObservableObject {
                     overlapTokens: Self.webChunkOverlapTokens
                 )
                 chunks.append(contentsOf: chunked)
+                completedWorkItems += 1
+                if reportProgress {
+                    contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+                }
             }
         }
 
-        for pdfURL in Array(Set(pdfURLs)) {
+        for pdfURL in uniquePDFs {
             let pageTexts = extractPDFPageTexts(from: pdfURL)
             for (pageIndex, pageText) in pageTexts.enumerated() {
                 let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
@@ -119,9 +168,25 @@ final class ChatService: ObservableObject {
                 )
                 chunks.append(contentsOf: chunked)
             }
+            completedWorkItems += 1
+            if reportProgress {
+                contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+            }
         }
 
         return chunks
+    }
+
+    /// Returns a stable key used to reuse pre-analyzed context.
+    private func makeContextKey(contextInput: String, pdfURLs: [URL]) -> String {
+        let normalizedContext = contextInput
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let normalizedPDFPaths = Array(Set(pdfURLs.map(\.path))).sorted().joined(separator: "|")
+        if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty {
+            return ""
+        }
+        return "\(normalizedContext)||\(normalizedPDFPaths)"
     }
 
     /// Extracts unique HTTP(S) URLs from free-form text.
