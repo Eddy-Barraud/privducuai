@@ -219,10 +219,20 @@ final class ChatService: ObservableObject {
 
     /// Builds the model prompt from recent history and retrieved context.
     private func buildPrompt(for userMessage: String, selectedContext: String) -> String {
-        let history = messages
+        let historyMessages: [ChatMessage]
+        if let last = messages.last, last.role == .user, last.content == userMessage {
+            historyMessages = Array(messages.dropLast())
+        } else {
+            historyMessages = messages
+        }
+
+        let history = historyMessages
             .suffix(Self.historyMessageLimit)
             .map { item in
-                "\(item.role == .user ? "User" : "Assistant"): \(item.content)"
+                if item.role == .assistant {
+                    return "Assistant: \(sanitizeAssistantContentForPrompt(item.content))"
+                }
+                return "User: \(item.content)"
             }
             .joined(separator: "\n")
 
@@ -238,6 +248,17 @@ final class ChatService: ObservableObject {
 
         Answer in a concise and practical way.
         """
+    }
+
+    /// Removes citation blocks from assistant messages before they are reused as conversation history.
+    private func sanitizeAssistantContentForPrompt(_ content: String) -> String {
+        let markers = ["\n\nTop 3 relevant chunks:", "\n\nTop 3 extraits pertinents :"]
+        for marker in markers {
+            if let range = content.range(of: marker) {
+                return String(content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return content
     }
 }
 
