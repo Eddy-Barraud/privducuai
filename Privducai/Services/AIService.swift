@@ -17,6 +17,8 @@ class AIService: ObservableObject {
     @Published var summary: String = ""
 
     private let webScraper = WebScrapingService()
+    private let ragChunker = RAGChunker()
+    private let ragContextService = RAGContextService()
 
     // Apple on-device Foundation Models context window (tokens)
     private static let contextWindowLimit = 4096
@@ -24,13 +26,13 @@ class AIService: ObservableObject {
     // subword token which is more compact than the ~4 chars typical for English.  Using 3
     // ensures we stay within budget for the denser language rather than the sparser one.
     private static let avgCharsPerToken = 3
+    private static let webChunkMaxTokens = 240
+    private static let webChunkOverlapTokens = 40
 
-    /// Summarize search results using Foundation Models or fallback to NLP
+    /// Summarize search results using Foundation Models or fallback to NLP.
     ///
-    /// - Parameter skipPerPageSummary: When `true` (fast-search mode), the raw scraped text
-    ///   from all pages is concatenated directly and passed as context to the final answer
-    ///   step instead of first summarising each page individually.  The combined text is
-    ///   still truncated to fit within the model's context-window budget.
+    /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
+    /// - Parameter skipPerPageSummary: Kept for API compatibility with existing call sites.
     func summarize(query: String, results: [SearchResult], maxScrapingResults: Int = 10, maxScrapingChars: Int = 5000, temperature: Double = 0.3, maxTokens: Int = 1000, language: ModelLanguage = .french, skipPerPageSummary: Bool = false) async -> String {
         isSummarizing = true
         defer { isSummarizing = false }
@@ -39,83 +41,48 @@ class AIService: ObservableObject {
         let urls = results.map { $0.url }
         let scrapedContent = await webScraper.scrapeMultiplePages(urls: urls, limit: maxScrapingResults, maxCharacters: maxScrapingChars)
 
-        let fullContext: String
-
-        if skipPerPageSummary {
-            // Fast-search mode: concatenate raw page texts and let the final step truncate.
-            // Distribute the context-window budget evenly across pages so a single large
-            // page cannot crowd out the others.
-            let instructionTokens = 100   // session instructions for the final answer step
-            let promptOverheadTokens = 80 // query label, section headers, closing instructions
-            let minContextTokens = 300    // reserve at least this many tokens for page content
-            // Apply a 20% utilization buffer to absorb tokeniser variance (French/European
-            // text can be denser than English, so 1 token ≠ exactly avgCharsPerToken chars).
-            let utilizationFactor = 0.8
-            let effectiveMaxResponseTokens = min(
-                maxTokens,
-                AIService.contextWindowLimit - instructionTokens - promptOverheadTokens - minContextTokens
-            )
-            let reservedTokens = instructionTokens + promptOverheadTokens + effectiveMaxResponseTokens
-            let availableChars = Int(Double(max(AIService.contextWindowLimit - reservedTokens, 0) * AIService.avgCharsPerToken) * utilizationFactor)
-            let pageCount = max(results.count, 1)
-            let charsPerPage = availableChars / pageCount
-
-            var rawParts: [String] = []
-            for result in results {
-                if let pageContent = scrapedContent[result.url] {
-                    let truncated = String(pageContent.prefix(charsPerPage))
-                    rawParts.append("Source: \(result.title)\nURL: \(result.url)\nContent:\n\(truncated)")
-                } else {
-                    rawParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
-                }
+        _ = skipPerPageSummary
+        var chunks: [RAGChunk] = []
+        for result in results {
+            if let pageContent = scrapedContent[result.url] {
+                let chunked = ragChunker.chunk(
+                    text: pageContent,
+                    source: result.title,
+                    maxChunkTokens: Self.webChunkMaxTokens,
+                    overlapTokens: Self.webChunkOverlapTokens,
+                    url: result.url
+                )
+                chunks.append(contentsOf: chunked)
+            } else {
+                let chunked = ragChunker.chunk(
+                    text: result.snippet,
+                    source: result.title,
+                    maxChunkTokens: Self.webChunkMaxTokens,
+                    overlapTokens: Self.webChunkOverlapTokens,
+                    url: result.url
+                )
+                chunks.append(contentsOf: chunked)
             }
-            fullContext = rawParts.joined(separator: "\n\n---\n\n")
-        } else {
-            // Standard mode: summarise each page individually, then combine the short
-            // summaries for the final answer step.
-
-            // Per-page summarization uses its own small response budget (2-3 sentence summaries).
-            // Compute content budget independently from the final-summary maxTokens setting so
-            // that a large maxTokens value doesn't unnecessarily shrink per-page content.
-            let pageResponseTokens = 150      // tokens reserved for each page summary response
-            let pageInstructionTokens = 40    // short per-page session instructions
-            let pagePromptOverheadTokens = 60 // query, title, labels in the per-page prompt
-            let pageContentAvailableTokens = max(
-                0,
-                AIService.contextWindowLimit - pageInstructionTokens - pagePromptOverheadTokens - pageResponseTokens
-            )
-            // Respect the user's maxScrapingChars setting; never exceed the token budget.
-            let pageMaxChars = min(maxScrapingChars, pageContentAvailableTokens * AIService.avgCharsPerToken)
-
-            var summarizedParts: [String] = []
-
-            for result in results {
-                if let pageContent = scrapedContent[result.url] {
-                    let pageSummary = await summarizePage(
-                        content: pageContent,
-                        title: result.title,
-                        url: result.url,
-                        query: query,
-                        temperature: temperature,
-                        language: language,
-                        maxResponseTokens: pageResponseTokens,
-                        maxContentChars: pageMaxChars
-                    )
-                    summarizedParts.append(pageSummary)
-                } else {
-                    // Use snippet if no full content was scraped
-                    summarizedParts.append("Source: \(result.title)\nURL: \(result.url)\nSnippet: \(result.snippet)")
-                }
-            }
-
-            fullContext = summarizedParts.joined(separator: "\n\n---\n\n")
         }
+        let selected = await ragContextService.selectContext(
+            chunks: chunks,
+            query: query,
+            maxResponseTokens: maxTokens
+        )
 
         // Try Foundation Models first, fallback to NLP if it fails
-        let summary = await generateSummaryWithFoundationModels(query: query, context: fullContext, results: results, temperature: temperature, maxTokens: maxTokens, language: language)
+        let summary = await generateSummaryWithFoundationModels(
+            query: query,
+            context: selected.selectedContext,
+            results: results,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            language: language
+        )
+        let withCitations = summary + RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
 
-        self.summary = summary
-        return summary
+        self.summary = withCitations
+        return withCitations
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
@@ -247,58 +214,6 @@ class AIService: ObservableObject {
             print("⚠️ Error generating summary with Foundation Models: \(error.localizedDescription)")
             // Fallback to basic summarization
             return await generateConciseSummary(query: query, context: context, results: results, language: language)
-        }
-    }
-
-    /// Summarizes one scraped page into a compact source-tagged block.
-    private func summarizePage(content: String, title: String, url: String, query: String, temperature: Double = 0.3, language: ModelLanguage = .french, maxResponseTokens: Int = 150, maxContentChars: Int = 2000) async -> String {
-        do {
-            // Create a fresh session for every page so that successive page calls within
-            // one search do not accumulate history and overflow the context window.
-            let pageInstructions: String
-            if language == .french {
-                pageInstructions = "Vous êtes un assistant qui résume brièvement le contenu de pages web en 2-3 phrases."
-            } else {
-                pageInstructions = "You are an assistant that briefly summarizes web page content in 2-3 sentences."
-            }
-            let session = LanguageModelSession(instructions: pageInstructions)
-
-            // Prepare a prompt to summarize this specific page
-            let pageSummaryPrompt: String
-            
-            if language == .french {
-                pageSummaryPrompt = """
-                Résumez brièvement le contenu suivant en 2-3 phrases, en mettant l'accent sur les informations pertinentes pour la requête : "\(query)"
-
-                Titre: \(title)
-                Contenu: \(content.prefix(maxContentChars))
-
-                Veuillez fournir uniquement le résumé, sans header ou introduction.
-                """
-            } else {
-                pageSummaryPrompt = """
-                Briefly summarize the following content in 2-3 sentences, focusing on information relevant to the query: "\(query)"
-
-                Title: \(title)
-                Content: \(content.prefix(maxContentChars))
-
-                Please provide only the summary, without header or introduction.
-                """
-            }
-
-            let options = GenerationOptions(
-                temperature: temperature,
-                maximumResponseTokens: maxResponseTokens
-            )
-
-            let response = try await session.respond(to: pageSummaryPrompt, options: options)
-            let pageSummary = String(describing: response.content)
-
-            return "Source: \(title)\nURL: \(url)\nSummary: \(pageSummary)"
-        } catch {
-            print("⚠️ Error summarizing page: \(error.localizedDescription)")
-            // Fallback: return original content info
-            return "Source: \(title)\nURL: \(url)\nContent: \(content.prefix(500))..."
         }
     }
 
