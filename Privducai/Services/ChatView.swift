@@ -243,10 +243,23 @@ struct ChatView: View {
 
     /// Handles dropped file providers and keeps PDF URLs only.
     private func handlePDFDrop(_ providers: [NSItemProvider], rowIndex: Int? = nil) -> Bool {
-        let pdfProviders = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        let pdfProviders = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
+        }
         guard !pdfProviders.isEmpty else { return false }
 
         for provider in pdfProviders {
+            if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
+                    guard let url, let persistentURL = persistDroppedPDF(url) else { return }
+                    Task { @MainActor in
+                        insertPDFSource(persistentURL, at: rowIndex)
+                    }
+                }
+                continue
+            }
+
             provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
                 let fileURL: URL?
                 if let data = item as? Data {
@@ -258,15 +271,40 @@ struct ChatView: View {
                 } else {
                     fileURL = nil
                 }
-                guard let fileURL, fileURL.pathExtension.lowercased() == "pdf" else { return }
+                guard let fileURL,
+                      fileURL.pathExtension.lowercased() == "pdf",
+                      let persistentURL = persistDroppedPDF(fileURL) else {
+                    return
+                }
 
                 Task { @MainActor in
-                    insertPDFSource(fileURL, at: rowIndex)
+                    insertPDFSource(persistentURL, at: rowIndex)
                 }
             }
         }
 
         return true
+    }
+
+    /// Copies dropped PDF to a stable temporary location so it remains readable for later context analysis.
+    private func persistDroppedPDF(_ sourceURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        let destinationDirectory = fileManager.temporaryDirectory.appendingPathComponent("PrivducaiDroppedPDFs", isDirectory: true)
+        do {
+            try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
+            let baseName = sourceURL.deletingPathExtension().lastPathComponent
+            let safeBaseName = baseName.isEmpty ? "dropped" : baseName
+            let destinationURL = destinationDirectory
+                .appendingPathComponent("\(UUID().uuidString)-\(safeBaseName)")
+                .appendingPathExtension("pdf")
+            if fileManager.fileExists(atPath: destinationURL.path) {
+                try fileManager.removeItem(at: destinationURL)
+            }
+            try fileManager.copyItem(at: sourceURL, to: destinationURL)
+            return destinationURL
+        } catch {
+            return nil
+        }
     }
 
     /// Adds incoming shared URLs/PDFs to context rows once.
