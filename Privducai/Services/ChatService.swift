@@ -1,0 +1,320 @@
+//
+//  ChatService.swift
+//  Privducai
+//
+//  Created by Eddy Barraud on 27/03/2026.
+//
+
+import Foundation
+import Combine
+import FoundationModels
+import PDFKit
+
+/// Service layer that orchestrates retrieval-augmented chat generation.
+@MainActor
+final class ChatService: ObservableObject {
+    @Published var messages: [ChatMessage] = []
+    @Published var isResponding = false
+    @Published var errorMessage: String?
+
+    private let webScraper = WebScrapingService()
+    private let ragChunker = RAGChunker()
+
+    // Apple Foundation Models practical context window budget used in this app.
+    // Context is always selected/truncated to fit this limit before generation.
+    // This aligns with the 4096-token window policy used across app generation flows.
+    private static let contextWindowLimit = 4096
+    // Conservative estimate to keep selected text under token limits across mixed languages.
+    private static let avgCharsPerToken = 3
+    // Keep web retrieval bounded to control latency and context size.
+    private static let maxWebContextURLs = 8
+    private static let maxWebScrapeCharacters = 8000
+    // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
+    private static let webChunkMaxTokens = 240
+    private static let webChunkOverlapTokens = 40
+    private static let pdfChunkMaxTokens = 220
+    private static let pdfChunkOverlapTokens = 30
+    // Token reservation for instructions/template/response before retrieved context allocation.
+    private static let instructionTokens = 120
+    private static let promptOverheadTokens = 120
+    private static let minContextTokens = 300
+    // Safety margin for tokenization variance.
+    private static let contextUtilizationFactor = 0.8
+    // Keep recent turns only, to leave room for retrieved context.
+    private static let historyMessageLimit = 6
+    // Response budget for chat generation while preserving room for retrieved context.
+    private static let chatResponseTokens = 700
+    // Guarantee minimum fallback context even under very small calculated budgets.
+    private static let minimumFallbackContextCharacters = 200
+    // Slightly prefer richer chunks while still primarily ranking by lexical relevance.
+    private static let longChunkCharacterThreshold = 300
+    private static let longChunkBonusScore = 0.2
+
+    /// Sends a user message and appends the assistant response.
+    func sendMessage(_ message: String, contextInput: String, pdfURLs: [URL]) async {
+        messages.append(ChatMessage(role: .user, content: message))
+        errorMessage = nil
+
+        isResponding = true
+        defer { isResponding = false }
+
+        let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
+        let selectedContext = selectContext(chunks: chunks, query: message, maxResponseTokens: Self.chatResponseTokens)
+
+        do {
+            let instructions = """
+            You are a helpful chat assistant. Answer the user clearly and accurately.
+            Use retrieved context when relevant and mention uncertainty when context is insufficient.
+            """
+            let session = LanguageModelSession(instructions: instructions)
+            let prompt = buildPrompt(for: message, selectedContext: selectedContext)
+            let options = GenerationOptions(temperature: 0.3, maximumResponseTokens: Self.chatResponseTokens)
+            let response = try await session.respond(to: prompt, options: options)
+            messages.append(ChatMessage(role: .assistant, content: String(describing: response.content)))
+        } catch {
+            let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
+            messages.append(ChatMessage(role: .assistant, content: fallback))
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    /// Collects web and PDF chunks from provided context.
+    private func collectChunks(contextInput: String, pdfURLs: [URL]) async -> [RAGChunk] {
+        var chunks: [RAGChunk] = []
+
+        let urls = extractURLs(from: contextInput)
+        if !urls.isEmpty {
+            let scraped = await webScraper.scrapeMultiplePages(
+                urls: urls,
+                limit: min(urls.count, Self.maxWebContextURLs),
+                maxCharacters: Self.maxWebScrapeCharacters
+            )
+            for url in urls {
+                guard let text = scraped[url] else { continue }
+                let chunked = ragChunker.chunk(
+                    text: text,
+                    source: "Web: \(url)",
+                    maxChunkTokens: Self.webChunkMaxTokens,
+                    overlapTokens: Self.webChunkOverlapTokens
+                )
+                chunks.append(contentsOf: chunked)
+            }
+        }
+
+        for pdfURL in Array(Set(pdfURLs)) {
+            let pageTexts = extractPDFPageTexts(from: pdfURL)
+            for (pageIndex, pageText) in pageTexts.enumerated() {
+                let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
+                let chunked = ragChunker.chunk(
+                    text: pageText,
+                    source: source,
+                    maxChunkTokens: Self.pdfChunkMaxTokens,
+                    overlapTokens: Self.pdfChunkOverlapTokens
+                )
+                chunks.append(contentsOf: chunked)
+            }
+        }
+
+        return chunks
+    }
+
+    /// Extracts unique HTTP(S) URLs from free-form text.
+    private func extractURLs(from raw: String) -> [String] {
+        let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+        let range = NSRange(raw.startIndex..<raw.endIndex, in: raw)
+        let found = detector?.matches(in: raw, options: [], range: range) ?? []
+
+        let urls = found.compactMap { match -> String? in
+            guard let url = match.url,
+                  let scheme = url.scheme?.lowercased(),
+                  scheme == "http" || scheme == "https" else {
+                return nil
+            }
+            return url.absoluteString
+        }
+
+        return Array(Set(urls))
+    }
+
+    /// Extracts non-empty text from every page of a PDF file URL.
+    private func extractPDFPageTexts(from url: URL) -> [String] {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let document = PDFDocument(url: url) else { return [] }
+        var pages: [String] = []
+
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex),
+                  let pageString = page.string?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !pageString.isEmpty else {
+                continue
+            }
+            pages.append(pageString)
+        }
+
+        return pages
+    }
+
+    /// Selects highest-ranked chunks that fit inside the context budget.
+    private func selectContext(chunks: [RAGChunk], query: String, maxResponseTokens: Int) -> String {
+        guard !chunks.isEmpty else {
+            return "No additional context provided."
+        }
+
+        let maxContextChars = calculateMaxContextCharacters(maxResponseTokens: maxResponseTokens)
+
+        let ranked: [(chunk: RAGChunk, score: Double)] = chunks
+            .map { chunk in
+                (chunk: chunk, score: relevanceScore(text: chunk.text, query: query))
+            }
+            .sorted { lhs, rhs in
+                if lhs.score == rhs.score {
+                    return lhs.chunk.text.count > rhs.chunk.text.count
+                }
+                return lhs.score > rhs.score
+            }
+
+        var selected: [String] = []
+        var currentChars = 0
+
+        for rankedChunk in ranked {
+            let chunk = rankedChunk.chunk
+            let chunkEntry = "Source: \(chunk.source)\n\(chunk.text)"
+            if currentChars + chunkEntry.count > maxContextChars {
+                continue
+            }
+            selected.append(chunkEntry)
+            currentChars += chunkEntry.count
+        }
+
+        if selected.isEmpty, let first = ranked.first {
+            let fallback = "Source: \(first.chunk.source)\n\(first.chunk.text)"
+            return String(fallback.prefix(max(Self.minimumFallbackContextCharacters, maxContextChars)))
+        }
+
+        return selected.joined(separator: "\n\n---\n\n")
+    }
+
+    /// Calculates available context characters from token constraints.
+    private func calculateMaxContextCharacters(maxResponseTokens: Int) -> Int {
+        let effectiveResponseTokens = min(
+            maxResponseTokens,
+            Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
+        )
+        let reservedTokens = Self.instructionTokens + Self.promptOverheadTokens + effectiveResponseTokens
+        let availableTokens = max(Self.contextWindowLimit - reservedTokens, 0)
+        return Int(Double(availableTokens * Self.avgCharsPerToken) * Self.contextUtilizationFactor)
+    }
+
+    /// Computes lexical relevance between a chunk and the user query.
+    private func relevanceScore(text: String, query: String) -> Double {
+        let queryWords = Set(tokenize(query).filter { $0.count > 2 })
+        guard !queryWords.isEmpty else { return 0 }
+
+        let textWords = Set(tokenize(text))
+        var score = 0.0
+        for word in queryWords where textWords.contains(word) {
+            score += 1.0
+        }
+
+        if text.count > Self.longChunkCharacterThreshold {
+            score += Self.longChunkBonusScore
+        }
+
+        return score
+    }
+
+    /// Tokenizes text into lowercase alphanumeric words.
+    private func tokenize(_ text: String) -> [String] {
+        text.lowercased()
+            .split { !$0.isLetter && !$0.isNumber }
+            .map(String.init)
+    }
+
+    /// Builds the model prompt from recent history and retrieved context.
+    private func buildPrompt(for userMessage: String, selectedContext: String) -> String {
+        let history = messages
+            .suffix(Self.historyMessageLimit)
+            .map { item in
+                "\(item.role == .user ? "User" : "Assistant"): \(item.content)"
+            }
+            .joined(separator: "\n")
+
+        return """
+        Conversation:
+        \(history)
+
+        Retrieved Context:
+        \(selectedContext)
+
+        User question:
+        \(userMessage)
+
+        Answer in a concise and practical way.
+        """
+    }
+}
+
+/// Represents a chat turn in the conversation.
+struct ChatMessage: Identifiable {
+    /// Distinguishes user and assistant messages.
+    enum Role {
+        case user
+        case assistant
+    }
+
+    let id = UUID()
+    let role: Role
+    let content: String
+}
+
+/// Represents a retrieval chunk and its source label.
+struct RAGChunk: Identifiable {
+    let id = UUID()
+    let source: String
+    let text: String
+}
+
+/// Splits long context text into overlapping retrieval chunks.
+struct RAGChunker {
+    // Keep this estimate aligned with ChatService token budgeting.
+    private static let avgCharsPerToken = 3
+    private static let whitespacePattern = "\\s+"
+    // Keep chunks large enough to carry coherent information for retrieval.
+    private static let minimumChunkCharacters = 200
+
+    /// Chunks text with overlap while preserving non-empty slices.
+    func chunk(text: String, source: String, maxChunkTokens: Int, overlapTokens: Int) -> [RAGChunk] {
+        let cleanText = text
+            .replacingOccurrences(of: Self.whitespacePattern, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !cleanText.isEmpty else { return [] }
+
+        let maxChunkChars = max(Self.minimumChunkCharacters, maxChunkTokens * Self.avgCharsPerToken)
+        // Cap overlap at 50% so each subsequent chunk still contributes mostly new context.
+        let overlapChars = min(maxChunkChars / 2, max(0, overlapTokens * Self.avgCharsPerToken))
+        let stride = max(1, maxChunkChars - overlapChars)
+
+        var chunks: [RAGChunk] = []
+        var start = cleanText.startIndex
+
+        while start < cleanText.endIndex {
+            let end = cleanText.index(start, offsetBy: maxChunkChars, limitedBy: cleanText.endIndex) ?? cleanText.endIndex
+            let piece = String(cleanText[start..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !piece.isEmpty {
+                chunks.append(RAGChunk(source: source, text: piece))
+            }
+
+            if end == cleanText.endIndex { break }
+            start = cleanText.index(start, offsetBy: stride, limitedBy: cleanText.endIndex) ?? cleanText.endIndex
+        }
+
+        return chunks
+    }
+}
