@@ -48,19 +48,25 @@ final class ChatService: ObservableObject {
         defer { isResponding = false }
 
         let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
+        let hasRequestedContext = !contextKey.isEmpty
+        let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
+            && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
+        debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
         let chunks: [RAGChunk]
-        if contextKey == preAnalyzedContextKey {
+        if canUsePreAnalyzed {
             chunks = preAnalyzedChunks
         } else {
             chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs)
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
         }
+        debugContext("sendMessage collected chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
             maxResponseTokens: Self.chatResponseTokens
         )
+        debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) topChunkCount=\(selected.topChunks.count)")
 
         do {
             let instructions = buildInstructions(for: message)
@@ -92,9 +98,11 @@ final class ChatService: ObservableObject {
 
         isAnalyzingContext = true
         contextAnalysisProgress = 0
+        debugContext("preAnalyzeContext started for pdfCount=\(pdfURLs.count)")
         let chunks = await collectChunks(contextInput: contextInput, pdfURLs: pdfURLs, reportProgress: true)
         preAnalyzedContextKey = contextKey
         preAnalyzedChunks = chunks
+        debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
     /// Collects web and PDF chunks from provided context.
@@ -141,6 +149,7 @@ final class ChatService: ObservableObject {
 
         for pdfURL in uniquePDFs {
             let pageTexts = extractPDFPageTexts(from: pdfURL)
+            debugContext("collectChunks pdf=\(pdfURL.lastPathComponent) extractedPages=\(pageTexts.count)")
             for (pageIndex, pageText) in pageTexts.enumerated() {
                 let source = "PDF: \(pdfURL.lastPathComponent) page \(pageIndex + 1)"
                 let chunked = ragChunker.chunk(
@@ -200,7 +209,10 @@ final class ChatService: ObservableObject {
             }
         }
 
-        guard let document = PDFDocument(url: url) else { return [] }
+        guard let document = PDFDocument(url: url) else {
+            debugContext("extractPDFPageTexts failed to open PDF at path=\(url.path)")
+            return []
+        }
         var pages: [String] = []
 
         for pageIndex in 0..<document.pageCount {
@@ -213,6 +225,12 @@ final class ChatService: ObservableObject {
         }
 
         return pages
+    }
+
+    private func debugContext(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[ChatService][Context] \(message())")
+        #endif
     }
 
     /// Builds the model prompt from recent history and retrieved context.
