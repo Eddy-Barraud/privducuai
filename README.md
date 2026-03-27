@@ -170,7 +170,13 @@ Potential improvements for future versions:
 
 ## License
 
-This project is open source and available for educational purposes.
+This project is licensed under the **Privducai Non-Commercial License v1.0**.
+
+**Non-Commercial Use Only**: The Software is available for personal projects, academic research, evaluation, and non-profit use at no charge.
+
+**For Commercial Use**: Contact the licensor to obtain a commercial license.
+
+See [LICENSE](LICENSE) file for full terms and conditions.
 
 ## Credits
 
