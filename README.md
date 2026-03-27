@@ -50,19 +50,15 @@ Privducai/
 ### Data Flow
 
 ```
-User Input
+User Query
     ↓
-SearchView / ChatView (UI Layer)
+DuckDuckGoService (Web Search)
     ↓
-ChatService / AIService (Business Logic)
+WebScrapingService (Extract Content)
     ↓
-DuckDuckGoService → Web Search Results
-WebScrapingService → Scraped Content
-RAGContextService → Context Management
+RAGContextService (Prepare Context)
     ↓
-NaturalLanguage Framework (On-Device AI)
-    ↓
-AppSettings (Configuration)
+NaturalLanguage Framework (Summarize & Analyze)
     ↓
 Results Display
 ```
