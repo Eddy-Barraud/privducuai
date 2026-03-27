@@ -242,6 +242,7 @@ private final class ChatService: ObservableObject {
     private let ragChunker = RAGChunker()
 
     // Apple Foundation Models practical context window budget.
+    // Context is always selected/truncated to fit this limit before generation.
     private static let contextWindowLimit = 4096
     // Conservative estimate to keep selected text under token limits across mixed languages.
     private static let avgCharsPerToken = 3
@@ -416,7 +417,8 @@ private final class ChatService: ObservableObject {
             maxResponseTokens,
             Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - Self.minContextTokens
         )
-        let availableTokens = max(Self.contextWindowLimit - Self.instructionTokens - Self.promptOverheadTokens - effectiveResponseTokens, 0)
+        let reservedTokens = Self.instructionTokens + Self.promptOverheadTokens + effectiveResponseTokens
+        let availableTokens = max(Self.contextWindowLimit - reservedTokens, 0)
         return Int(Double(availableTokens * Self.avgCharsPerToken) * Self.contextUtilizationFactor)
     }
 
@@ -428,9 +430,11 @@ private final class ChatService: ObservableObject {
         )
         guard !queryWords.isEmpty else { return 0 }
 
-        let textLower = text.lowercased()
+        let textWords = Set(
+            text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        )
         var score = 0.0
-        for word in queryWords where textLower.contains(word) {
+        for word in queryWords where textWords.contains(word) {
             score += 1.0
         }
 
@@ -483,12 +487,13 @@ private struct RAGChunk: Identifiable {
 
 private struct RAGChunker {
     private static let avgCharsPerToken = 3
+    private static let whitespacePattern = "\\s+"
     // Keep chunks large enough to carry coherent information for retrieval.
     private static let minimumChunkCharacters = 200
 
     func chunk(text: String, source: String, maxChunkTokens: Int, overlapTokens: Int) -> [RAGChunk] {
         let cleanText = text
-            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .replacingOccurrences(of: Self.whitespacePattern, with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !cleanText.isEmpty else { return [] }
