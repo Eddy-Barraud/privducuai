@@ -1,12 +1,13 @@
 # Privducai
 
 A fast, efficient, and privacy-focused web search assistant for macOS, powered by DuckDuckGo and Apple's on-device AI frameworks.
+The app bundles context-aware chat experience, scraping web content, analyzing PDF documents, and ranking chunks of text.
 
 ## Features
 
 - 🔍 **DuckDuckGo Integration**: Privacy-respecting web search
-- ⚡ **Optimized for M3 MacBook**: Efficient power management and fast performance
-- 🧠 **On-Device AI**: Uses Apple's NaturalLanguage framework for summaries
+- ⚡ **Optimized for Apple Silicon**: Efficient power management and fast performance
+- 🧠 **On-Device AI**: Uses Apple's Foundation Models
 - 📝 **Concise Summaries**: Get quick insights without reading through multiple pages
 - 🔗 **Direct Links**: Easy access to sources for detailed information
 - 💬 **Tabbed Chat Experience**: Switch between Search Assist and Chat
@@ -29,37 +30,95 @@ Privducai (Privacy + Education + AI) is a native macOS application that provides
 ```
 Privducai/
 ├── Models/
-│   └── SearchResult.swift          # Data models for search results
+│   ├── AppSettings.swift           # User-configurable settings (language, token limits)
+│   └── SearchResult.swift          # Data models for search results and metadata
 ├── Services/
-│   ├── DuckDuckGoService.swift     # Web search integration
-│   ├── AIService.swift             # On-device AI summarization
-│   ├── ChatService.swift           # Retrieval-augmented chat orchestration
-│   ├── ChatView.swift              # Chat user interface
-│   └── WebScrapingService.swift    # Web page content extraction
+│   ├── DuckDuckGoService.swift     # Web search integration with result fetching
+│   ├── AIService.swift             # On-device AI summarization using NaturalLanguage
+│   ├── ChatService.swift           # Retrieval-augmented generation orchestration
+│   ├── RAGContextService.swift     # Context management for chat queries
+│   ├── WebScrapingService.swift    # Web page content extraction and parsing
+│   └── ChatView.swift              # Chat user interface and interaction logic
 ├── Views/
-│   └── SearchView.swift            # Main search interface
-├── ContentView.swift               # Root view
-└── PrivducaiApp.swift             # App entry point
+│   └── SearchView.swift            # Main search interface and results display
+├── Assets.xcassets/                # App icons and color definitions
+├── ContentView.swift               # Root view and main UI container
+├── PrivducaiApp.swift              # App entry point and lifecycle management
+└── Privducai.entitlements          # macOS sandbox and capability permissions
 ```
+
+### Data Flow
+
+```
+User Input
+    ↓
+SearchView / ChatView (UI Layer)
+    ↓
+ChatService / AIService (Business Logic)
+    ↓
+DuckDuckGoService → Web Search Results
+WebScrapingService → Scraped Content
+RAGContextService → Context Management
+    ↓
+NaturalLanguage Framework (On-Device AI)
+    ↓
+AppSettings (Configuration)
+    ↓
+Results Display
+```
+
+### Key Components
+
+#### **Models**
+- **SearchResult**: Structures for search results containing title, URL, description
+- **AppSettings**: Configuration for language preference, token limits, and AI parameters
+
+#### **Services**
+- **DuckDuckGoService**: Handles privacy-respecting web search queries via DuckDuckGo's instant answer API
+- **WebScrapingService**: Extracts and parses content from web pages for context
+- **AIService**: Performs on-device summarization using Apple's NaturalLanguage framework
+- **RAGContextService**: Manages retrieval-augmented generation context from URLs and PDFs
+- **ChatService**: Orchestrates multi-step queries combining search, scraping, and AI processing
+
+#### **Views**
+- **ContentView**: Root view managing tab navigation between Search and Chat modes
+- **SearchView**: Search interface with results display and summary toggling
+- **ChatView**: Conversational interface with context attachment support (drag-and-drop PDF support)
 
 ## Technical Details
 
+### Frameworks & Technologies
+
+- **SwiftUI**: Modern declarative UI framework for macOS
+- **Foundation**: Core networking with URLSession
+- **NaturalLanguage**: On-device NLP for tokenization and tagging
+- **PDFKit**: PDF document parsing and handling
+
 ### Power Efficiency
 
-- **URLSession Configuration**: Optimized for low power consumption
-- **Request Caching**: Reduces redundant network requests
-- **Limited Results**: Fetches only top 10 results per query
-- **On-Device Processing**: No external API calls for AI processing
+- **URLSession Configuration**: Optimized for macOS with request timeouts
+- **Request Caching**: Reduces redundant network requests with URLCache
+- **Limited Results**: Fetches only top results per query to minimize data transfer
+- **On-Device Processing**: No external API calls for AI processing, all NLP happens locally
+- **Background Tasks**: Efficient async/await patterns for non-blocking operations
 
-### AI Summarization
+### AI Summarization Pipeline
 
 The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
-- **NLTokenizer**: Sentence segmentation
-- **NLTagger**: Part-of-speech tagging and key term extraction
-- **Relevance Scoring**: Custom algorithm to identify most relevant sentences
-- **Extractive Summarization**: Selects key information from search results
 
-### Privacy
+1. **Sentence Tokenization** (`NLTokenizer`): Splits text into sentences
+2. **POS Tagging** (`NLTagger`): Identifies important terms using part-of-speech analysis
+3. **Relevance Scoring**: Custom algorithm calculates sentence importance based on keyword frequency and position
+4. **Extractive Summarization**: Selects top-scoring sentences while preserving order and context
+5. **Result Formatting**: CleanHTML output with preserved links and structure
+
+### Search Integration
+
+- **DuckDuckGo API**: Queries instant answer endpoint for privacy-respecting results
+- **Web Scraping**: Extracts full article content for deeper context
+- **RAG Pipeline**: Combines retrieved documents with user queries for context-aware responses
+
+### Privacy & Security
 
 - Uses DuckDuckGo's privacy-focused search
 - All AI processing happens on-device
@@ -74,9 +133,94 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
 
 ## Building
 
+### Quick Start (Simulator)
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/eddybarraud/Privducai.git
+   cd Privducai
+   ```
+
+2. **Open the project in Xcode**
+   ```bash
+   open Privducai.xcodeproj
+   ```
+
+3. **Select a simulator target** (top-left corner)
+   - Example: "Privducai" → Any Mac (Apple Silicon) or your preferred simulator
+
+4. **Build and run**
+   - Press `⌘B` to build
+   - Press `⌘R` to build and run
+
+### Device Build (Mac)
+
+For building on a physical Mac, you'll need to configure signing:
+
+#### Option 1: Automatic Signing (Recommended)
+
 1. Open `Privducai.xcodeproj` in Xcode
-2. Select your target device
-3. Build and run (⌘R)
+2. Select the **Privducai** target
+3. Go to **Signing & Capabilities**
+4. Enable **Automatically manage signing**
+5. Select your **Team** from the dropdown
+6. Set the **Bundle Identifier** (e.g., `com.yourusername.Privducai`)
+7. Build and run with `⌘R`
+
+#### Option 2: Local Signing Configuration
+
+If you prefer to keep signing configurations local:
+
+1. Copy the signing template:
+   ```bash
+   cp Configs/LocalSigning.xcconfig.sample Configs/LocalSigning.xcconfig
+   ```
+
+2. Edit `Configs/LocalSigning.xcconfig` and add your team ID:
+   ```
+   DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE
+   ```
+
+3. The project will automatically use this configuration for device builds
+
+### Building from Command Line
+
+#### Build for Simulator
+```bash
+xcodebuild -project Privducai.xcodeproj \
+  -scheme Privducai \
+  -destination 'generic/platform=macOS,variant=Mac Catalyst' \
+  -configuration Debug build
+```
+
+#### Build for Mac
+```bash
+xcodebuild -project Privducai.xcodeproj \
+  -scheme Privducai \
+  -configuration Release build
+```
+
+#### Archive for Distribution
+```bash
+xcodebuild -project Privducai.xcodeproj \
+  -scheme Privducai \
+  -configuration Release \
+  -archivePath build/Privducai.xcarchive archive
+```
+
+### Troubleshooting Build Issues
+
+**Issue: Code signing is required for running on device**
+- Ensure you've selected a Team under Target → Signing & Capabilities
+- Verify your Apple ID is added in Xcode Preferences → Accounts
+
+**Issue: Pod/SPM dependencies not loading**
+- Run `xcodebuild -resolvePackageDependencies`
+- Clean build folder (`⇧⌘K`) and rebuild
+
+**Issue: Build fails with entitlements error**
+- Verify `Privducai.entitlements` is included in the target's Build Phases
+- Check that your Team ID matches the entitlements file
 
 ## Usage Tips
 
