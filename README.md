@@ -37,10 +37,10 @@ Privducai/
 │   ├── AIService.swift             # On-device AI summarization using NaturalLanguage
 │   ├── ChatService.swift           # Retrieval-augmented generation orchestration
 │   ├── RAGContextService.swift     # Context management for chat queries
-│   ├── WebScrapingService.swift    # Web page content extraction and parsing
-│   └── ChatView.swift              # Chat user interface and interaction logic
+│   └── WebScrapingService.swift    # Web page content extraction and parsing
 ├── Views/
-│   └── SearchView.swift            # Main search interface and results display
+│   ├── SearchView.swift            # Main search interface and results display
+│   └── ChatView.swift              # Chat user interface and interaction logic
 ├── Assets.xcassets/                # App icons and color definitions
 ├── ContentView.swift               # Root view and main UI container
 ├── PrivducaiApp.swift              # App entry point and lifecycle management
@@ -133,8 +133,6 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
 
 ## Building
 
-### Quick Start (Simulator)
-
 1. **Clone the repository**
    ```bash
    git clone https://github.com/eddybarraud/Privducai.git
@@ -146,81 +144,13 @@ The app uses Apple's NaturalLanguage framework instead of cloud-based LLMs:
    open Privducai.xcodeproj
    ```
 
-3. **Select a simulator target** (top-left corner)
-   - Example: "Privducai" → Any Mac (Apple Silicon) or your preferred simulator
+3. **Configure signing** (for device builds)
+   - Select the **Privducai** target
+   - Go to **Signing & Capabilities**
+   - Enable **Automatically manage signing** and select your Team
 
 4. **Build and run**
-   - Press `⌘B` to build
-   - Press `⌘R` to build and run
-
-### Device Build (Mac)
-
-For building on a physical Mac, you'll need to configure signing:
-
-#### Option 1: Automatic Signing (Recommended)
-
-1. Open `Privducai.xcodeproj` in Xcode
-2. Select the **Privducai** target
-3. Go to **Signing & Capabilities**
-4. Enable **Automatically manage signing**
-5. Select your **Team** from the dropdown
-6. Set the **Bundle Identifier** (e.g., `com.yourusername.Privducai`)
-7. Build and run with `⌘R`
-
-#### Option 2: Local Signing Configuration
-
-If you prefer to keep signing configurations local:
-
-1. Copy the signing template:
-   ```bash
-   cp Configs/LocalSigning.xcconfig.sample Configs/LocalSigning.xcconfig
-   ```
-
-2. Edit `Configs/LocalSigning.xcconfig` and add your team ID:
-   ```
-   DEVELOPMENT_TEAM = YOUR_TEAM_ID_HERE
-   ```
-
-3. The project will automatically use this configuration for device builds
-
-### Building from Command Line
-
-#### Build for Simulator
-```bash
-xcodebuild -project Privducai.xcodeproj \
-  -scheme Privducai \
-  -destination 'generic/platform=macOS,variant=Mac Catalyst' \
-  -configuration Debug build
-```
-
-#### Build for Mac
-```bash
-xcodebuild -project Privducai.xcodeproj \
-  -scheme Privducai \
-  -configuration Release build
-```
-
-#### Archive for Distribution
-```bash
-xcodebuild -project Privducai.xcodeproj \
-  -scheme Privducai \
-  -configuration Release \
-  -archivePath build/Privducai.xcarchive archive
-```
-
-### Troubleshooting Build Issues
-
-**Issue: Code signing is required for running on device**
-- Ensure you've selected a Team under Target → Signing & Capabilities
-- Verify your Apple ID is added in Xcode Preferences → Accounts
-
-**Issue: Pod/SPM dependencies not loading**
-- Run `xcodebuild -resolvePackageDependencies`
-- Clean build folder (`⇧⌘K`) and rebuild
-
-**Issue: Build fails with entitlements error**
-- Verify `Privducai.entitlements` is included in the target's Build Phases
-- Check that your Team ID matches the entitlements file
+   - Press `⌘B` to build or `⌘R` to build and run
 
 ## Usage Tips
 
