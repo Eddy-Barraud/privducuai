@@ -78,6 +78,7 @@ struct ChatView: View {
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                             renderedMessageContent(message)
+                                .textSelection(.enabled)
                         }
                         .padding(10)
                         .background(
@@ -114,7 +115,6 @@ struct ChatView: View {
             LLMStreamView(text: message.content)
         } else {
             Text(message.content)
-                .textSelection(.enabled)
         }
     }
 
