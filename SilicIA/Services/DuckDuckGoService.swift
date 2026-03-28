@@ -121,6 +121,7 @@ class DuckDuckGoService: ObservableObject {
         guard !query.isEmpty else { return [] }
         guard maxResults > 0 else { return [] }
 
+        debugSearch("start queryLength=\(query.count) maxResults=\(maxResults)")
         isSearching = true
         defer { isSearching = false }
 
@@ -136,31 +137,59 @@ class DuckDuckGoService: ObservableObject {
         guard let url = components?.url else {
             throw SearchError.invalidURL
         }
+        debugSearch("request url=\(url.absoluteString)")
         
         let (data, response) = try await session.data(from: url)
 
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard let httpResponse = response as? HTTPURLResponse else {
+            debugSearch("invalid non-HTTP response")
+            throw SearchError.invalidResponse
+        }
+        debugSearch("response status=\(httpResponse.statusCode) bytes=\(data.count)")
+
+        guard httpResponse.statusCode == 200 else {
+            debugSearch("non-200 payloadSummary=\(debugPayloadSummary(from: data))")
             throw SearchError.invalidResponse
         }
 
-        return try parseAPIResults(from: data, query: query, maxResults: maxResults)
+        let results = try parseAPIResults(from: data, query: query, maxResults: maxResults)
+        if results.isEmpty {
+            debugSearch("no results produced queryLength=\(query.count) payloadSummary=\(debugPayloadSummary(from: data))")
+        } else {
+            debugSearch("completed resultsCount=\(results.count)")
+        }
+        return results
     }
 
     /// Parse DuckDuckGo API response.
     private func parseAPIResults(from data: Data, query: String, maxResults: Int) throws -> [SearchResult] {
-        guard let response = try? JSONDecoder().decode(DuckDuckGoAPIResponse.self, from: data) else {
+        let response: DuckDuckGoAPIResponse
+        do {
+            response = try JSONDecoder().decode(DuckDuckGoAPIResponse.self, from: data)
+        } catch {
+            debugSearch("decode failed error=\"\(error.localizedDescription)\" payloadSummary=\(debugPayloadSummary(from: data))")
             throw SearchError.parsingFailed
         }
+        debugSearch(
+            "decoded headingEmpty=\((response.heading ?? "").isEmpty) " +
+            "abstractURLEmpty=\((response.abstractURL ?? "").isEmpty) " +
+            "resultsCount=\(response.results?.count ?? 0) " +
+            "relatedTopicsCount=\(response.relatedTopics?.count ?? 0)"
+        )
 
         var results: [SearchResult] = []
         var seenURLs = Set<String>()
+        var duplicatesFiltered = 0
+        var missingURLItems = 0
 
         func appendResult(title: String, url: String, snippet: String) {
             guard results.count < maxResults else { return }
             let cleanURL = normalizeResultURL(url)
             guard !cleanURL.isEmpty else { return }
-            guard seenURLs.insert(cleanURL).inserted else { return }
+            guard seenURLs.insert(cleanURL).inserted else {
+                duplicatesFiltered += 1
+                return
+            }
             results.append(SearchResult(
                 title: title.isEmpty ? query : title,
                 url: cleanURL,
@@ -179,7 +208,10 @@ class DuckDuckGoService: ObservableObject {
         }
 
         for item in response.results ?? [] {
-            guard let url = item.firstURL else { continue }
+            guard let url = item.firstURL else {
+                missingURLItems += 1
+                continue
+            }
             let (title, snippet) = splitTitleAndSnippet(
                 text: item.text ?? item.result ?? "",
                 fallbackTitle: query
@@ -198,7 +230,10 @@ class DuckDuckGoService: ObservableObject {
                 return
             }
 
-            guard let url = topic.firstURL else { return }
+            guard let url = topic.firstURL else {
+                missingURLItems += 1
+                return
+            }
             let (title, snippet) = splitTitleAndSnippet(
                 text: topic.text ?? topic.result ?? "",
                 fallbackTitle: query
@@ -211,6 +246,9 @@ class DuckDuckGoService: ObservableObject {
             appendTopic(topic)
         }
 
+        debugSearch(
+            "parse summary finalCount=\(results.count) duplicatesFiltered=\(duplicatesFiltered) missingURLItems=\(missingURLItems)"
+        )
         return results
     }
 
@@ -239,6 +277,7 @@ class DuckDuckGoService: ObservableObject {
         let cleaned = htmlToPlainText(text)
         guard !cleaned.isEmpty else { return (fallbackTitle, "") }
 
+        // Handle common space-delimited title/snippet separators.
         for separator in [" - ", " — ", " – ", ": "] {
             let parts = cleaned.components(separatedBy: separator)
             if parts.count >= 2 {
@@ -250,6 +289,24 @@ class DuckDuckGoService: ObservableObject {
         }
 
         return (cleaned, "")
+    }
+
+    /// Summarizes payload shape without logging full content.
+    private func debugPayloadSummary(from data: Data) -> String {
+        let byteCount = data.count
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return "bytes=\(byteCount) jsonTopLevel=unknown"
+        }
+        let keys = dictionary.keys.sorted().joined(separator: ",")
+        return "bytes=\(byteCount) jsonTopLevelKeys=[\(keys)]"
+    }
+
+    /// Emits DuckDuckGo search diagnostics only in DEBUG builds.
+    private func debugSearch(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[DuckDuckGoService] \(message())")
+        #endif
     }
 }
 
