@@ -71,7 +71,7 @@ struct RAGSelectionOptions {
     let longChunkCharacterThreshold: Int
     let longChunkBonusScore: Double
 
-    static let `default` = RAGSelectionOptions(
+    nonisolated static let `default` = RAGSelectionOptions(
         contextWindowLimit: 4096,
         avgCharsPerToken: 3,
         instructionTokens: 120,
@@ -197,18 +197,18 @@ enum RAGCitationFormatter {
         guard !chunks.isEmpty else { return "" }
 
         let isFrench = language == .french
-        let title = isFrench ? "\n\nTop 3 extraits pertinents :" : "\n\nTop 3 relevant chunks:"
-        let urlLabel = "URL"
-        let pageLabel = isFrench ? "Page PDF" : "PDF Page"
+        let title = isFrench ? "\n\n## Top 3 extraits pertinents :\n\n" : "\n\n## Top 3 relevant chunks:\n\n"
+        let pageLabel = "PDF Page"
 
         let lines = chunks.enumerated().flatMap { index, ranked -> [String] in
             var row: [String] = []
-            row.append("\(index + 1). Source: \(ranked.chunk.source)")
+            
             if let url = ranked.chunk.url {
-                row.append("   \(urlLabel): \(url)")
+                row.append("\(index + 1)- [\(url)](\(url)) \n")
             }
             if let page = ranked.chunk.pdfPage {
-                row.append("   \(pageLabel): \(page)")
+                row.append("\(index + 1)- Source: \(ranked.chunk.source)")
+                row.append("   \(pageLabel): \(page) \n")
             }
             return row
         }

@@ -6,6 +6,8 @@
 //
 
 import SwiftUI
+import AppKit
+import LLMStream
 
 /// Main search experience that fetches web results and generates AI summaries.
 struct SearchView: View {
@@ -24,6 +26,24 @@ struct SearchView: View {
     // Generation timer
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
+    
+    private static let llmCustomColorConfig = ColorConfiguration(
+        textColor: .black,
+        backgroundColor: .clear,
+        codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
+        codeBorderColor: .black,
+        linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        thoughtBackgroundColor: Color.gray.opacity(0.8),
+        tableHeaderBackgroundColor: Color.gray.opacity(0.5),
+        tableBorderColor: .black,
+        tableRowEvenColor: .black,
+        tableRowHoverColor: .black,
+        theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        proofBorderColor: .black
+    )
+    @State private var LLMS_cust_config = LLMStreamConfiguration(
+        colors: Self.llmCustomColorConfig
+    )
 
     /// Lays out header, search controls, and context-sensitive body content.
     var body: some View {
@@ -190,9 +210,12 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {
-                Text(LocalizedStringKey(aiService.summary))
-                    .font(.body)
-                    .foregroundColor(.primary)
+                
+                LLMStreamView(text: aiService.summary, configuration: LLMS_cust_config) { urlString in
+                    guard let url = URL(string: urlString) else { return }
+                    NSWorkspace.shared.open(url)
+                }
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
             // Generation time shown at the bottom-right once complete

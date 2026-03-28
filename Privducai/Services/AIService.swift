@@ -102,6 +102,8 @@ class AIService: ObservableObject {
             - Incluez les faits et détails clés
             - Maintenez la précision
             - Utilisez un langage clair et facile à comprendre
+            - Symboles et maths encapsulée par $...$
+            - Expressions mathématique générale encapsulée par \\[...\\]
             Répondez dans la même langue que la question de l'utilisateur (ici: français).
             """
         }
@@ -116,6 +118,8 @@ class AIService: ObservableObject {
         - Include key facts and details
         - Maintain accuracy
         - Use clear, easy-to-understand language
+        - Inline expressions using $...$
+        - Display math using \\[...\\]
         Respond in the same language as the user's latest question.
         """
     }

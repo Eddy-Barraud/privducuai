@@ -65,6 +65,7 @@
 			);
 			name = Privducai;
 			packageProductDependencies = (
+				7A1C9D8B4E2F114500ABCD01 /* LLMStream */,
 			);
 			productName = Privducai;
 			productReference = 36D5D0B42F7190B80090D706 /* Privducai.app */;
@@ -98,11 +99,33 @@
 			productRefGroup = 36D5D0B52F7190B80090D706 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
+			packageReferences = (
+				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */,
+			);
 			targets = (
 				36D5D0B32F7190B80090D706 /* Privducai */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/synth-inc/LLMStream";
+			requirement = {
+				branch = main;
+				kind = branch;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		7A1C9D8B4E2F114500ABCD01 /* LLMStream */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */;
+			productName = LLMStream;
+		};
+/* End XCSwiftPackageProductDependency section */
 
 /* Begin PBXResourcesBuildPhase section */
 		36D5D0B22F7190B80090D706 /* Resources */ = {

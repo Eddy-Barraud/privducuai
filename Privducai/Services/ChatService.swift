@@ -339,7 +339,7 @@ final class ChatService: ObservableObject {
 
     /// Removes citation blocks from assistant messages before they are reused as conversation history.
     private func sanitizeAssistantContentForPrompt(_ content: String) -> String {
-        let markers = ["\n\nTop 3 relevant chunks:", "\n\nTop 3 extraits pertinents :"]
+        let markers = ["\n\nTop 3 extraits pertinents :\n\n", "\n\nTop 3 relevant chunks:\n\n"]
         for marker in markers {
             if let range = content.range(of: marker) {
                 return String(content[..<range.lowerBound]).trimmingCharacters(in: .whitespacesAndNewlines)

@@ -8,6 +8,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import LLMStream
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
 struct ChatView: View {
@@ -20,6 +21,24 @@ struct ChatView: View {
     @State private var showFileImporter = false
     @State private var contextSources: [ContextSource] = [ContextSource(kind: .url(text: ""))]
     @State private var preanalysisTask: Task<Void, Never>?
+
+    private static let llmCustomColorConfig = ColorConfiguration(
+        textColor: .black,
+        backgroundColor: .clear,
+        codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
+        codeBorderColor: .black,
+        linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        thoughtBackgroundColor: Color.gray.opacity(0.8),
+        tableHeaderBackgroundColor: Color.gray.opacity(0.5),
+        tableBorderColor: .black,
+        tableRowEvenColor: .black,
+        tableRowHoverColor: .black,
+        theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+        proofBorderColor: .black
+    )
+    @State private var LLMS_cust_config = LLMStreamConfiguration(
+        colors: Self.llmCustomColorConfig
+    )
 
     /// Renders chat transcript, composer, and context inputs.
     var body: some View {
@@ -107,13 +126,17 @@ struct ChatView: View {
         .cornerRadius(10)
     }
 
-    /// Renders assistant replies as Markdown when possible, with plaintext fallback.
-    private func renderedMessageContent(_ message: ChatMessage) -> Text {
-        guard message.role == .assistant,
-              let attributed = try? AttributedString(markdown: message.content) else {
-            return Text(message.content)
+    /// Renders assistant replies through LLMStream and keeps plaintext for user turns.
+    @ViewBuilder
+    private func renderedMessageContent(_ message: ChatMessage) -> some View {
+        if message.role == .assistant {
+            LLMStreamView(text: message.content, configuration: LLMS_cust_config) { urlString in
+                guard let url = URL(string: urlString) else { return }
+                NSWorkspace.shared.open(url)
+            }
+        } else {
+            Text(message.content)
         }
-        return Text(attributed)
     }
 
     /// Renders input area and send action.
