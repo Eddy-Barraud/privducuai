@@ -192,4 +192,5 @@ git clone https://github.com/eddybarraud/Privducai.git
 
 ## Credits
 
-Created by Eddy Barraud
+- Created by Eddy Barraud
+- Uses [LLMStream](https://github.com/synth-inc/LLMStream)
