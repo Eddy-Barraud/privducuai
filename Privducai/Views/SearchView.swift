@@ -192,7 +192,26 @@ struct SearchView: View {
                     .foregroundColor(.secondary)
                     .italic()
             } else if !aiService.summary.isEmpty {
-                LLMStreamView(text: aiService.summary) { urlString in
+                
+                let LLM_cust_colorConfig = ColorConfiguration(
+                    textColor: .black,
+                    backgroundColor: .clear,
+                    codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
+                    codeBorderColor: .black,
+                    linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+                    thoughtBackgroundColor: Color.gray.opacity(0.8),
+                    tableHeaderBackgroundColor: Color.gray.opacity(0.5),
+                    tableBorderColor: .black,
+                    tableRowEvenColor: .black,
+                    tableRowHoverColor: .black,
+                    theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
+                    proofBorderColor: .black,
+                )
+                let LLMS_cust_config = LLMStreamConfiguration(
+                    colors: LLM_cust_colorConfig,
+                )
+
+                LLMStreamView(text: aiService.summary, configuration: LLMS_cust_config) { urlString in
                     guard let url = URL(string: urlString) else { return }
                     NSWorkspace.shared.open(url)
                 }

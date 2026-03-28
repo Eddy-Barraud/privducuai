@@ -198,14 +198,14 @@ enum RAGCitationFormatter {
 
         let isFrench = language == .french
         let title = isFrench ? "\n\nTop 3 extraits pertinents :" : "\n\nTop 3 relevant chunks:"
-        let urlLabel = "URL"
+        let urlLabel = "Link"
         let pageLabel = isFrench ? "Page PDF" : "PDF Page"
 
         let lines = chunks.enumerated().flatMap { index, ranked -> [String] in
             var row: [String] = []
-            row.append("\(index + 1). Source: \(ranked.chunk.source)")
+            row.append("\(index + 1)- Source: \(ranked.chunk.source)")
             if let url = ranked.chunk.url {
-                row.append("   \(urlLabel): \(url)")
+                row.append("   [\(urlLabel)](\(url))")
             }
             if let page = ranked.chunk.pdfPage {
                 row.append("   \(pageLabel): \(page)")

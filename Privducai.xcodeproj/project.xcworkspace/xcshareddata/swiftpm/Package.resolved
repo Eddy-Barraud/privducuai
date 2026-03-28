@@ -1,0 +1,15 @@
+{
+  "originHash" : "90b788f1fa7d35d74e3cbc4de67b03fa138336a54cbbd360fd453583d00078e8",
+  "pins" : [
+    {
+      "identity" : "llmstream",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/synth-inc/LLMStream",
+      "state" : {
+        "branch" : "main",
+        "revision" : "57c2887ee63a25fbf10983b6b2be480b717e432a"
+      }
+    }
+  ],
+  "version" : 3
+}
