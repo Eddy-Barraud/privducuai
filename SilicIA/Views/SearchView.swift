@@ -17,6 +17,7 @@ struct SearchView: View {
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []
     @State private var showingSummary = false
+    @State private var isNoAIMode = false
     @State private var errorMessage: String?
 
     // Settings
@@ -115,9 +116,9 @@ struct SearchView: View {
             }
 
             HStack(spacing: 6) {
-                Button(action: { performSearch(maxResults: 3, maxScrapingChars: 1500) }) {
+                Button(action: { performSearch(maxResults: 5, maxScrapingChars: 1500, noAIOnly: true) }) {
                     Label(
-                        settings.language == .french ? "Rapide" : "Quick",
+                        "No AI",
                         systemImage: "bolt.fill"
                     )
                     .font(.subheadline)
@@ -154,27 +155,29 @@ struct SearchView: View {
     private var resultsView: some View {
         ScrollView {
             VStack(spacing: 16) {
-                // AI Summary
-                if showingSummary {
-                    summaryCard
-                }
-
-                // Toggle summary button
-                Button(action: { toggleSummary() }) {
-                    HStack {
-                        Image(systemName: showingSummary ? "eye.slash" : "sparkles")
-                        if settings.language == .french {
-                            Text(showingSummary ? "Masquer le résumé" : "Afficher le résumé IA")
-                        } else {
-                            Text(showingSummary ? "Hide Summary" : "Show AI Summary")
-                        }
+                if !isNoAIMode {
+                    // AI Summary
+                    if showingSummary {
+                        summaryCard
                     }
-                    .font(.subheadline)
-                    .fontWeight(.medium)
-                }
-                .buttonStyle(.bordered)
 
-                Divider()
+                    // Toggle summary button
+                    Button(action: { toggleSummary() }) {
+                        HStack {
+                            Image(systemName: showingSummary ? "eye.slash" : "sparkles")
+                            if settings.language == .french {
+                                Text(showingSummary ? "Masquer le résumé" : "Afficher le résumé IA")
+                            } else {
+                                Text(showingSummary ? "Hide Summary" : "Show AI Summary")
+                            }
+                        }
+                        .font(.subheadline)
+                        .fontWeight(.medium)
+                    }
+                    .buttonStyle(.bordered)
+
+                    Divider()
+                }
 
                 // Search results
                 ForEach(searchResults) { result in
@@ -390,7 +393,7 @@ struct SearchView: View {
 
     // MARK: - Actions
     /// Executes a web search then optionally triggers summary generation.
-    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) {
+    private func performSearch(maxResults: Int? = nil, maxScrapingChars: Int? = nil, noAIOnly: Bool = false) {
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
 
@@ -398,16 +401,17 @@ struct SearchView: View {
         searchResults = []
         aiService.summary = ""
         showingSummary = false
+        isNoAIMode = noAIOnly
         
         Task {
             do {
                 searchResults = try await searchService.search(query: searchQuery, maxResults: resultsCount)
                 errorMessage = nil
 
-                // Auto-generate summary for the first search
-                if !searchResults.isEmpty && !showingSummary {
+                // Auto-generate summary only when AI mode is enabled
+                if !noAIOnly && !searchResults.isEmpty && !showingSummary {
                     showingSummary = true
-                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars, skipPerPageSummary: skipPerPageSummary)
+                    await generateSummary(maxScrapingResults: resultsCount, maxScrapingChars: scrapingChars)
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -418,6 +422,7 @@ struct SearchView: View {
 
     /// Toggles summary visibility and lazily generates it when first opened.
     private func toggleSummary() {
+        guard !isNoAIMode else { return }
         showingSummary.toggle()
         if showingSummary && aiService.summary.isEmpty {
             Task {
@@ -427,7 +432,7 @@ struct SearchView: View {
     }
 
     /// Generates a synthesized answer from current search results.
-    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil, skipPerPageSummary: Bool = false) async {
+    private func generateSummary(maxScrapingResults: Int? = nil, maxScrapingChars: Int? = nil) async {
         summaryStartTime = Date()
         summaryElapsedSeconds = nil
         _ = await aiService.summarize(
@@ -437,8 +442,7 @@ struct SearchView: View {
             maxScrapingChars: maxScrapingChars ?? settings.maxScrapingCharacters,
             temperature: settings.temperature,
             maxTokens: settings.maxResponseTokens,
-            language: settings.language,
-            skipPerPageSummary: skipPerPageSummary
+            language: settings.language
         )
         if let start = summaryStartTime {
             summaryElapsedSeconds = Date().timeIntervalSince(start)
@@ -450,6 +454,7 @@ struct SearchView: View {
         searchQuery = ""
         searchResults = []
         showingSummary = false
+        isNoAIMode = false
         aiService.summary = ""
         errorMessage = nil
         summaryStartTime = nil

@@ -340,24 +340,4 @@ class AIService: ObservableObject {
         return score
     }
 
-    /// Returns a lightweight canned answer for simple definition/how-to queries.
-    func generateQuickAnswer(query: String, results: [SearchResult]) -> String? {
-        let queryLower = query.lowercased()
-
-        // Handle definition queries
-        if queryLower.hasPrefix("what is ") || queryLower.hasPrefix("define ") {
-            if let firstResult = results.first {
-                return "**Quick Answer:** \(firstResult.snippet)\n\n[Source: \(firstResult.title)](\(firstResult.url))"
-            }
-        }
-
-        // Handle how-to queries
-        if queryLower.hasPrefix("how to ") || queryLower.hasPrefix("how do i ") {
-            if let firstResult = results.first {
-                return "**Quick Guide:** \(firstResult.snippet)\n\n[Full instructions: \(firstResult.title)](\(firstResult.url))"
-            }
-        }
-
-        return nil
-    }
 }
