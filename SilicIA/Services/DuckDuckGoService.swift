@@ -56,25 +56,50 @@ private func htmlToPlainText(_ html: String) -> String {
     return result.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
-/// Extract the inner HTML for the first element matching a class name and tag.
-private func extractInnerHTML(in html: String, className: String, tagName: String) -> String? {
-    let escapedClassName = NSRegularExpression.escapedPattern(for: className)
-    let escapedTagName = NSRegularExpression.escapedPattern(for: tagName)
-    let pattern = "<\(escapedTagName)[^>]*class=\"[^\"]*\\b\(escapedClassName)\\b[^\"]*\"[^>]*>([\\s\\S]*?)</\(escapedTagName)>"
+private struct DuckDuckGoAPIResponse: Decodable {
+    let heading: String?
+    let abstractText: String?
+    let abstractURL: String?
+    let results: [DuckDuckGoAPIResult]?
+    let relatedTopics: [DuckDuckGoAPITopic]?
 
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
-        return nil
+    enum CodingKeys: String, CodingKey {
+        case heading = "Heading"
+        case abstractText = "AbstractText"
+        case abstractURL = "AbstractURL"
+        case results = "Results"
+        case relatedTopics = "RelatedTopics"
     }
-    let range = NSRange(html.startIndex..., in: html)
-    guard let match = regex.firstMatch(in: html, options: [], range: range),
-          let contentRange = Range(match.range(at: 1), in: html) else {
-        return nil
+}
+
+private struct DuckDuckGoAPIResult: Decodable {
+    let firstURL: String?
+    let text: String?
+    let result: String?
+
+    enum CodingKeys: String, CodingKey {
+        case firstURL = "FirstURL"
+        case text = "Text"
+        case result = "Result"
     }
-    return String(html[contentRange])
+}
+
+private struct DuckDuckGoAPITopic: Decodable {
+    let firstURL: String?
+    let text: String?
+    let result: String?
+    let topics: [DuckDuckGoAPITopic]?
+
+    enum CodingKeys: String, CodingKey {
+        case firstURL = "FirstURL"
+        case text = "Text"
+        case result = "Result"
+        case topics = "Topics"
+    }
 }
 
 @MainActor
-/// Performs DuckDuckGo HTML search and parses result cards.
+/// Performs DuckDuckGo API search and parses result cards.
 class DuckDuckGoService: ObservableObject {
     @Published var isSearching = false
     @Published var error: Error?
@@ -91,82 +116,139 @@ class DuckDuckGoService: ObservableObject {
         self.session = URLSession(configuration: config)
     }
 
-    /// Search DuckDuckGo using their HTML API
+    /// Search DuckDuckGo using their public Instant Answer API.
     func search(query: String, maxResults: Int = 10) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
+        guard maxResults > 0 else { return [] }
 
+        debugSearch("start queryLength=\(query.count) maxResults=\(maxResults)")
         isSearching = true
         defer { isSearching = false }
 
-        // Use DuckDuckGo HTML search (more efficient than scraping)
-        let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        let urlString = "https://html.duckduckgo.com/html/?q=\(encodedQuery)"
+        var components = URLComponents(string: "https://api.duckduckgo.com/")
+        components?.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "format", value: "json"),
+            URLQueryItem(name: "no_html", value: "1"),
+            URLQueryItem(name: "no_redirect", value: "1"),
+            URLQueryItem(name: "skip_disambig", value: "0")
+        ]
 
-        guard let url = URL(string: urlString) else {
+        guard let url = components?.url else {
             throw SearchError.invalidURL
         }
+        debugSearch("request url=\(url.absoluteString)")
+        
+        let (data, response) = try await session.data(from: url)
 
-        var request = URLRequest(url: url)
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+        guard let httpResponse = response as? HTTPURLResponse else {
+            debugSearch("invalid non-HTTP response")
+            throw SearchError.invalidResponse
+        }
+        debugSearch("response status=\(httpResponse.statusCode) bytes=\(data.count)")
 
-        let (data, response) = try await session.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
+        guard httpResponse.statusCode == 200 else {
+            debugSearch("non-200 payloadSummary=\(debugPayloadSummary(from: data))")
             throw SearchError.invalidResponse
         }
 
-        // Parse HTML results
-        let results = try parseHTMLResults(from: data, query: query)
-        return Array(results.prefix(maxResults)) // Limit to user-configured max results
+        let results = try parseAPIResults(from: data, query: query, maxResults: maxResults)
+        if results.isEmpty {
+            debugSearch("no results produced queryLength=\(query.count) payloadSummary=\(debugPayloadSummary(from: data))")
+        } else {
+            debugSearch("completed resultsCount=\(results.count)")
+        }
+        return results
     }
 
-    /// Parse DuckDuckGo HTML response
-    private func parseHTMLResults(from data: Data, query: String) throws -> [SearchResult] {
-        guard let html = String(data: data, encoding: .utf8) else {
+    /// Parse DuckDuckGo API response.
+    private func parseAPIResults(from data: Data, query: String, maxResults: Int) throws -> [SearchResult] {
+        let response: DuckDuckGoAPIResponse
+        do {
+            response = try JSONDecoder().decode(DuckDuckGoAPIResponse.self, from: data)
+        } catch {
+            debugSearch("decode failed error=\"\(error.localizedDescription)\" payloadSummary=\(debugPayloadSummary(from: data))")
             throw SearchError.parsingFailed
         }
+        debugSearch(
+            "decoded headingEmpty=\((response.heading ?? "").isEmpty) " +
+            "abstractURLEmpty=\((response.abstractURL ?? "").isEmpty) " +
+            "resultsCount=\(response.results?.count ?? 0) " +
+            "relatedTopicsCount=\(response.relatedTopics?.count ?? 0)"
+        )
 
         var results: [SearchResult] = []
+        var seenURLs = Set<String>()
+        var duplicatesFiltered = 0
+        var missingURLItems = 0
 
-        // Simple HTML parsing - look for result blocks
-        // DuckDuckGo HTML structure: results are in divs with class "result"
-        let components = html.components(separatedBy: "class=\"result__a\"")
-
-        for i in 1..<min(components.count, 11) {
-            let component = components[i]
-
-            // Extract URL
-            guard let hrefRange = component.range(of: "href=\""),
-                  let hrefEndRange = component.range(of: "\"", range: hrefRange.upperBound..<component.endIndex) else {
-                continue
+        func appendResult(title: String, url: String, snippet: String) {
+            guard results.count < maxResults else { return }
+            let cleanURL = normalizeResultURL(url)
+            guard !cleanURL.isEmpty else { return }
+            guard seenURLs.insert(cleanURL).inserted else {
+                duplicatesFiltered += 1
+                return
             }
-            let url = String(component[hrefRange.upperBound..<hrefEndRange.lowerBound])
-
-            // Extract title
-            guard let titleStart = component.range(of: ">"),
-                  let titleEnd = component.range(of: "</a>", range: titleStart.upperBound..<component.endIndex) else {
-                continue
-            }
-            let title = htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
-
-            // Extract snippet. The snippet may include nested tags (<b>, <span>, etc.);
-            // capture the full element content instead of stopping at the first closing tag.
-            let snippetHTML = extractInnerHTML(in: component, className: "result__snippet", tagName: "a")
-                ?? extractInnerHTML(in: component, className: "result__snippet", tagName: "div")
-                ?? ""
-            let snippet = htmlToPlainText(snippetHTML)
-
-            // Clean up URL (DuckDuckGo redirects)
-            let cleanURL = url.hasPrefix("//duckduckgo.com/l/?") ? extractActualURL(from: url) : url
-
             results.append(SearchResult(
-                title: title.isEmpty ? "Result \(i)" : title,
+                title: title.isEmpty ? query : title,
                 url: cleanURL,
                 snippet: snippet.isEmpty ? "No description available" : snippet
             ))
         }
 
+        if let abstractURL = response.abstractURL, !abstractURL.isEmpty {
+            let heading = htmlToPlainText(response.heading ?? "")
+            let title = heading.isEmpty ? query : heading
+            appendResult(
+                title: title,
+                url: abstractURL,
+                snippet: htmlToPlainText(response.abstractText ?? "")
+            )
+        }
+
+        for item in response.results ?? [] {
+            guard let url = item.firstURL else {
+                missingURLItems += 1
+                continue
+            }
+            let (title, snippet) = splitTitleAndSnippet(
+                text: item.text ?? item.result ?? "",
+                fallbackTitle: query
+            )
+            appendResult(title: title, url: url, snippet: snippet)
+            if results.count >= maxResults { return results }
+        }
+
+        func appendTopic(_ topic: DuckDuckGoAPITopic) {
+            guard results.count < maxResults else { return }
+            if let nested = topic.topics, !nested.isEmpty {
+                for subtopic in nested {
+                    appendTopic(subtopic)
+                    if results.count >= maxResults { return }
+                }
+                return
+            }
+
+            guard let url = topic.firstURL else {
+                missingURLItems += 1
+                return
+            }
+            let (title, snippet) = splitTitleAndSnippet(
+                text: topic.text ?? topic.result ?? "",
+                fallbackTitle: query
+            )
+            appendResult(title: title, url: url, snippet: snippet)
+        }
+
+        for topic in response.relatedTopics ?? [] {
+            if results.count >= maxResults { break }
+            appendTopic(topic)
+        }
+
+        debugSearch(
+            "parse summary finalCount=\(results.count) duplicatesFiltered=\(duplicatesFiltered) missingURLItems=\(missingURLItems)"
+        )
         return results
     }
 
@@ -178,6 +260,53 @@ class DuckDuckGoService: ObservableObject {
             return ddgURL
         }
         return decoded
+    }
+
+    private func normalizeResultURL(_ urlString: String) -> String {
+        var normalized = urlString
+        if normalized.hasPrefix("//") {
+            normalized = "https:" + normalized
+        }
+        if normalized.contains("duckduckgo.com/l/?") {
+            normalized = extractActualURL(from: normalized)
+        }
+        return normalized
+    }
+
+    private func splitTitleAndSnippet(text: String, fallbackTitle: String) -> (String, String) {
+        let cleaned = htmlToPlainText(text)
+        guard !cleaned.isEmpty else { return (fallbackTitle, "") }
+
+        // Handle common space-delimited title/snippet separators.
+        for separator in [" - ", " — ", " – ", ": "] {
+            let parts = cleaned.components(separatedBy: separator)
+            if parts.count >= 2 {
+                let title = parts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? fallbackTitle
+                let snippet = parts.dropFirst().joined(separator: separator)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return (title.isEmpty ? fallbackTitle : title, snippet)
+            }
+        }
+
+        return (cleaned, "")
+    }
+
+    /// Summarizes payload shape without logging full content.
+    private func debugPayloadSummary(from data: Data) -> String {
+        let byteCount = data.count
+        guard let object = try? JSONSerialization.jsonObject(with: data),
+              let dictionary = object as? [String: Any] else {
+            return "bytes=\(byteCount) jsonTopLevel=unknown"
+        }
+        let keys = dictionary.keys.sorted().joined(separator: ",")
+        return "bytes=\(byteCount) jsonTopLevelKeys=[\(keys)]"
+    }
+
+    /// Emits DuckDuckGo search diagnostics only in DEBUG builds.
+    private func debugSearch(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[DuckDuckGoService] \(message())")
+        #endif
     }
 }
 
