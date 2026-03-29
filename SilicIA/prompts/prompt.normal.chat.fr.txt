@@ -9,9 +9,4 @@ Question de l'utilisateur :
 
 Réponds de façon concise et pratique.
 Quand c'est pertinent, inclus des expressions ou formules mathématiques.
-Format de sortie attendu : LaTeX pour les expressions mathématiques.
-Règles de format math :
-- Utilise $...$ pour l'inline.
-- Utilise \[...\] pour les blocs.
-- Utilise un LaTeX simple compatible avec le rendu de l'application.
-- N'utilise jamais d'environnements \begin{.
+Format de sortie attendu : LaTeX.

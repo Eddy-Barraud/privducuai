@@ -4,4 +4,4 @@ Answer in a short, precise and factual manner.
 Answer in English.
 Answer in one sentence maximum.
 If relevant, include a short mathematical expression.
-Required output format: LaTeX for mathematical expressions, using $...$ inline.
+Required output format: LaTeX.

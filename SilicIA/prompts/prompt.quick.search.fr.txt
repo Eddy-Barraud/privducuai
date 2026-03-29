@@ -4,4 +4,4 @@ Réponds de manière courte, précise et factuelle.
 Réponds en français.
 Réponds en une phrase maximum.
 Si pertinent, inclus une expression mathématique courte.
-Format de sortie attendu : LaTeX pour les expressions mathématiques, avec $...$ en inline.
+Format de sortie attendu : LaTeX.

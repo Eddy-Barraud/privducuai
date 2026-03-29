@@ -8,6 +8,5 @@ Réponds avec :
 2. {{keyPointsRangeFr}} points clés.
 Limite : ~{{targetWordCount}} mots.
 Format de sortie attendu : LaTeX pour les expressions mathématiques.
-Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
-Format math attendu: inline avec $...$ et blocs avec \[...\].
-N'utilise jamais d'environnements \begin{.
+Quand c'est pertinent, inclus des formules mathématiques.
+Format de sortie attendu : LaTeX.
