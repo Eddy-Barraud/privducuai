@@ -405,7 +405,7 @@ class AIService: ObservableObject {
         // Add top sources with links
         summaryParts.append(isFrench ? "**Principales sources :**" : "**Top Sources:**")
         for (index, result) in results.prefix(5).enumerated() {
-            summaryParts.append("\(index + 1). [\(result.title)](\(result.url))")
+            summaryParts.append("\(index + 1). \\href{\(result.url)}{\(result.title)}")
         }
 
         return summaryParts.joined(separator: "\n")

@@ -203,7 +203,7 @@ enum RAGCitationFormatter {
             var row: [String] = []
             
             if let url = ranked.chunk.url {
-                row.append("\(index + 1)- [\(url)](\(url)) \n")
+                row.append("\(index + 1)- \\href{\(url)}{\(url)} \n")
             }
             if let page = ranked.chunk.pdfPage {
                 row.append("\(index + 1)- Source: \(ranked.chunk.source)")
