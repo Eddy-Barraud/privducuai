@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		36D25B9F2F78168800B52C37 /* LLMStream in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD01 /* LLMStream */; };
+		36D25B9F2F78168800B52C37 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = 7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -27,7 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				36D25B9F2F78168800B52C37 /* LLMStream in Frameworks */,
+				36D25B9F2F78168800B52C37 /* LaTeXSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -70,7 +70,7 @@
 			);
 			name = SilicIA;
 			packageProductDependencies = (
-				7A1C9D8B4E2F114500ABCD01 /* LLMStream */,
+				7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */,
 			);
 			productName = SilicIA;
 			productReference = 36D5D0B42F7190B80090D706 /* SilicIA.app */;
@@ -101,7 +101,7 @@
 			mainGroup = 36D5D0AB2F7190B80090D706;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */,
+				7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 36D5D0B52F7190B80090D706 /* Products */;
@@ -382,21 +382,21 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */ = {
+		7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/synth-inc/LLMStream";
+			repositoryURL = "https://github.com/colinc86/LaTeXSwiftUI";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		7A1C9D8B4E2F114500ABCD01 /* LLMStream */ = {
+		7A1C9D8B4E2F114500ABCD01 /* LaTeXSwiftUI */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LLMStream" */;
-			productName = LLMStream;
+			package = 7A1C9D8B4E2F114500ABCD02 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */;
+			productName = LaTeXSwiftUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

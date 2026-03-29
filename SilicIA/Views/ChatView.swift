@@ -7,7 +7,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
-import LLMStream
+import LaTeXSwiftUI
 #if os(macOS)
 import AppKit
 #elseif canImport(UIKit)
@@ -28,27 +28,6 @@ struct ChatView: View {
     @State private var preanalysisTask: Task<Void, Never>?
     @State private var settings = AppSettings()
     @FocusState private var isInputFieldFocused: Bool
-
-    private var llmCustomColorConfig: ColorConfiguration {
-        ColorConfiguration(
-        textColor: colorScheme == .dark ? .white : .black,
-        backgroundColor: .clear,
-        codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
-        codeBorderColor: .black,
-        linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
-        thoughtBackgroundColor: Color.gray.opacity(0.8),
-        tableHeaderBackgroundColor: Color.gray.opacity(0.5),
-        tableBorderColor: .black,
-        tableRowEvenColor: .black,
-        tableRowHoverColor: .black,
-        theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
-        proofBorderColor: .black
-    )
-    }
-
-    private var llmStreamConfig: LLMStreamConfiguration {
-        LLMStreamConfiguration(colors: llmCustomColorConfig)
-    }
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -180,25 +159,16 @@ struct ChatView: View {
         .cornerRadius(10)
     }
 
-    /// Renders assistant replies through LLMStream and keeps plaintext for user turns.
+    /// Renders assistant replies with LaTeX-aware text and keeps plaintext for user turns.
     @ViewBuilder
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
-            LLMStreamView(text: message.content, configuration: llmStreamConfig) { urlString in
-                guard let url = URL(string: urlString) else { return }
-                openExternalURL(url)
-            }
+            LaTeX(message.content)
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
         } else {
             Text(message.content)
         }
-    }
-
-    private func openExternalURL(_ url: URL) {
-        #if os(macOS)
-        NSWorkspace.shared.open(url)
-        #elseif canImport(UIKit)
-        UIApplication.shared.open(url)
-        #endif
     }
 
     /// Renders input area and send action.

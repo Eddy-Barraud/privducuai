@@ -1,0 +1,13 @@
+Question: {{query}}
+
+Web context:
+{{context}}
+
+Respond with:
+1. A direct answer.
+2. {{keyPointsRange}} key points.
+Limit: about {{targetWordCount}} words.
+Required output format: LaTeX for mathematical expressions.
+When relevant, include mathematical formulas in simple LaTeX.
+Required math format: use $...$ inline and \[...\].
+Never use environments with \begin{.

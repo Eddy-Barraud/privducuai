@@ -72,28 +72,12 @@ class AIService: ObservableObject {
 
         do {
             let session = firstGuessSession(for: language)
-            let prompt: String
-            if language == .french {
-                prompt = """
-                Question: \(trimmedQuery)
-
-                Réponds de manière courte, précise et factuelle.
-                Réponds en français.
-                Réponds en une phrase maximum.
-                Si pertinent, inclus une expression mathématique courte.
-                Format math attendu: inline avec $...$.
-                """
-            } else {
-                prompt = """
-                Question: \(trimmedQuery)
-
-                Answer in a short, precise and factual manner.
-                Answer in English.
-                Answer in one sentence maximum.
-                If relevant, include a short mathematical expression.
-                Required math format: use $...$ inline.
-                """
-            }
+            let prompt = PromptLoader.loadPrompt(
+                mode: "quick",
+                feature: "search",
+                language: language,
+                replacements: ["query": trimmedQuery]
+            ) ?? fallbackFirstGuessPrompt(for: trimmedQuery, language: language)
 
             let options = GenerationOptions(
                 temperature: temperature,
@@ -228,36 +212,14 @@ class AIService: ObservableObject {
 
     /// Builds compact instructions for the selected response language.
     private func buildInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
-            return """
-            Tu produis un résumé web précis et concis.
-            Réponds en français.
-            Donne une réponse directe, puis 1 à 3 points clés.
-            Si une information est incertaine, indique-le clairement.
-            """
-        }
-
-        return """
-        You produce concise, accurate web summaries.
-        Respond in English.
-        Give a direct answer, then 1 to 3 key points.
-        If information is uncertain, state it explicitly.
-        """
+        PromptLoader.loadPrompt(mode: "normal", feature: "search", variant: "instructions", language: language)
+            ?? fallbackSummaryInstructions(for: language)
     }
 
     /// Builds instructions for an ultra-short first-guess response.
     private static func buildFirstGuessInstructions(for language: ModelLanguage) -> String {
-        if language == .french {
-            return """
-            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
-            Répondez en français.
-            """
-        }
-
-        return """
-        You are a helpful chat assistant. Answer the user clearly and accurately.
-        Respond in english.
-        """
+        PromptLoader.loadPrompt(mode: "quick", feature: "search", variant: "instructions", language: language)
+            ?? fallbackFirstGuessInstructions(for: language)
     }
 
     /// Returns a long-lived first-guess session and rebuilds it when language changes.
@@ -340,42 +302,24 @@ class AIService: ObservableObject {
                 }
             }
 
-            let isFrench = language == .french
-
-            let prompt: String
-            if isFrench {
-                prompt = """
-                Question : \(query)
-
-                Contexte web :
-                \(selectedContext)
-
-                Réponds avec :
-                1. Une réponse directe.
-                2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
-                Limite : ~\(targetWordCount) mots.
-                Réponds en format Markdown.
-                Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
-                Format math attendu: inline avec $...$ et blocs avec \\[...\\].
-                N'utilise jamais d'environnements \\begin{.
-                """
-            } else {
-                prompt = """
-                Question: \(query)
-
-                Web context:
-                \(selectedContext)
-
-                Respond with:
-                1. A direct answer.
-                2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
-                Limit: about \(targetWordCount) words.
-                Answer in Markdown format.
-                When relevant, include mathematical formulas in simple LaTeX.
-                Required math format: use $...$ inline and \\[...\\].
-                Never use environments with \\begin{.
-                """
-            }
+            let prompt = PromptLoader.loadPrompt(
+                mode: "normal",
+                feature: "search",
+                language: language,
+                replacements: [
+                    "query": query,
+                    "context": selectedContext,
+                    "targetWordCount": "\(targetWordCount)",
+                    "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
+                    "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
+                ]
+            ) ?? fallbackSummaryPrompt(
+                query: query,
+                context: selectedContext,
+                language: language,
+                isDeepProfile: isDeepProfile,
+                targetWordCount: targetWordCount
+            )
 
             #if DEBUG
             debugNotes.append(
@@ -465,6 +409,104 @@ class AIService: ObservableObject {
         }
 
         return summaryParts.joined(separator: "\n")
+    }
+
+    private static func fallbackFirstGuessInstructions(for language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
+            Répondez en français.
+            """
+        }
+
+        return """
+        You are a helpful chat assistant. Answer the user clearly and accurately.
+        Respond in english.
+        """
+    }
+
+    private func fallbackSummaryInstructions(for language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Tu produis un résumé web précis et concis.
+            Réponds en français.
+            Donne une réponse directe, puis 1 à 3 points clés.
+            Si une information est incertaine, indique-le clairement.
+            """
+        }
+
+        return """
+        You produce concise, accurate web summaries.
+        Respond in English.
+        Give a direct answer, then 1 to 3 key points.
+        If information is uncertain, state it explicitly.
+        """
+    }
+
+    private func fallbackFirstGuessPrompt(for query: String, language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Question: \(query)
+
+            Réponds de manière courte, précise et factuelle.
+            Réponds en français.
+            Réponds en une phrase maximum.
+            Si pertinent, inclus une expression mathématique courte.
+            Format de sortie attendu : LaTeX pour les expressions mathématiques, avec $...$ en inline.
+            """
+        }
+
+        return """
+        Question: \(query)
+
+        Answer in a short, precise and factual manner.
+        Answer in English.
+        Answer in one sentence maximum.
+        If relevant, include a short mathematical expression.
+        Required output format: LaTeX for mathematical expressions, using $...$ inline.
+        """
+    }
+
+    private func fallbackSummaryPrompt(
+        query: String,
+        context: String,
+        language: ModelLanguage,
+        isDeepProfile: Bool,
+        targetWordCount: Int
+    ) -> String {
+        if language == .french {
+            return """
+            Question : \(query)
+
+            Contexte web :
+            \(context)
+
+            Réponds avec :
+            1. Une réponse directe.
+            2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
+            Limite : ~\(targetWordCount) mots.
+            Format de sortie attendu : LaTeX pour les expressions mathématiques.
+            Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
+            Format math attendu: inline avec $...$ et blocs avec \\[...\\].
+            N'utilise jamais d'environnements \\begin{.
+            """
+        }
+
+        return """
+        Question: \(query)
+
+        Web context:
+        \(context)
+
+        Respond with:
+        1. A direct answer.
+        2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
+        Limit: about \(targetWordCount) words.
+        Required output format: LaTeX for mathematical expressions.
+        When relevant, include mathematical formulas in simple LaTeX.
+        Required math format: use $...$ inline and \\[...\\].
+        Never use environments with \\begin{.
+        """
     }
 
     /// Calculates lexical relevance of one sentence against the query.

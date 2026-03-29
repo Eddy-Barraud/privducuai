@@ -193,4 +193,4 @@ git clone https://github.com/eddybarraud/SilicIA.git
 ## Credits
 
 - Created by Eddy Barraud
-- Uses [LLMStream](https://github.com/synth-inc/LLMStream)
+- Uses [LaTeXSwiftUI](https://github.com/colinc86/LaTeXSwiftUI)
