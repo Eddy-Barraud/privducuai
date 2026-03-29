@@ -36,6 +36,7 @@ struct SearchView: View {
     // Generation timer
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
+    @State private var firstGuessElapsedSeconds: Double? = nil
     @State private var firstGuessText = ""
     @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
@@ -322,6 +323,15 @@ struct SearchView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
+                        if let elapsed = firstGuessElapsedSeconds {
+                            let label = settings.language == .french
+                                ? String(format: "Première réponse en: %.1f s", elapsed)
+                                : String(format: "Time to first answer: %.1f s", elapsed)
+                            Text(label)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+
                         if let elapsed = summaryElapsedSeconds {
                             let label = settings.language == .french
                                 ? String(format: "Généré en %.1f s", elapsed)
@@ -576,6 +586,7 @@ struct SearchView: View {
         searchResults = []
         aiService.summary = ""
         firstGuessText = ""
+        firstGuessElapsedSeconds = nil
         isGeneratingFirstGuess = false
         showingSummary = !noAIOnly
         isNoAIMode = noAIOnly
@@ -590,12 +601,14 @@ struct SearchView: View {
         if !noAIOnly {
             isGeneratingFirstGuess = true
             Task {
+                let firstGuessStart = Date()
                 let firstGuess = await aiService.generateFirstGuess(
                     query: trimmedQuery,
                     language: settings.language
                 )
                 guard activeSearchRequestID == requestID else { return }
                 firstGuessText = firstGuess
+                firstGuessElapsedSeconds = Date().timeIntervalSince(firstGuessStart)
                 isGeneratingFirstGuess = false
             }
         }
@@ -670,6 +683,7 @@ struct SearchView: View {
         showingSummary = false
         isNoAIMode = false
         firstGuessText = ""
+        firstGuessElapsedSeconds = nil
         isGeneratingFirstGuess = false
         aiService.summary = ""
         errorMessage = nil
