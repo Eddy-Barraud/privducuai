@@ -110,6 +110,7 @@ struct ChatView: View {
             Spacer()
         }
         .padding(.bottom, 2)
+        .textSelection(.enabled)
     }
 
     /// Renders message history and in-progress state.

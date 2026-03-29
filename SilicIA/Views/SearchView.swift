@@ -236,6 +236,7 @@ struct SearchView: View {
             }
             .padding()
         }
+        .textSelection(.enabled)
     }
 
     // MARK: - Summary Card
@@ -433,6 +434,7 @@ struct SearchView: View {
             }
             .padding()
         }
+        .textSelection(.enabled)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
@@ -460,6 +462,7 @@ struct SearchView: View {
             }
             .padding()
         }
+        .textSelection(.enabled)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
