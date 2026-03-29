@@ -36,6 +36,9 @@ struct SearchView: View {
     // Generation timer
     @State private var summaryStartTime: Date? = nil
     @State private var summaryElapsedSeconds: Double? = nil
+    @State private var firstGuessText = ""
+    @State private var isGeneratingFirstGuess = false
+    @State private var activeSearchRequestID = UUID()
     
     private var llmCustomColorConfig: ColorConfiguration {
         ColorConfiguration(
@@ -265,27 +268,60 @@ struct SearchView: View {
                     .fontWeight(.semibold)
 
                 Spacer()
-                if aiService.isSummarizing {
+                if aiService.isSummarizing || isGeneratingFirstGuess {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
             }
 
-            if aiService.isSummarizing {
-                Text(settings.language == .french ? "Analyse des pages web complètes..." : "Analyzing full web pages...")
-                    .foregroundColor(.secondary)
-                    .italic()
-            } else if !aiService.summary.isEmpty {
-                
-                LLMStreamView(text: aiService.summary, configuration: llmStreamConfig) { urlString in
-                    guard let url = URL(string: urlString) else { return }
-                    openExternalURL(url)
-                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text("First guess")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                if isGeneratingFirstGuess && firstGuessText.isEmpty {
+                    Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
+                        .foregroundColor(.secondary)
+                        .italic()
+                } else if !firstGuessText.isEmpty {
+                    LLMStreamView(text: firstGuessText, configuration: llmStreamConfig) { urlString in
+                        guard let url = URL(string: urlString) else { return }
+                        openExternalURL(url)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Web context answer")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+
+                if aiService.isSummarizing {
+                    Text(settings.language == .french ? "Analyse des pages web complètes..." : "Analyzing full web pages...")
+                        .foregroundColor(.secondary)
+                        .italic()
+                } else if !aiService.summary.isEmpty {
+                    LLMStreamView(text: aiService.summary, configuration: llmStreamConfig) { urlString in
+                        guard let url = URL(string: urlString) else { return }
+                        openExternalURL(url)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text(settings.language == .french ? "Réponse avec contexte web en attente..." : "Waiting for web-context answer...")
+                        .foregroundColor(.secondary)
+                        .italic()
+                }
             }
 
             // Generation time shown at the bottom-right once complete
-            if !aiService.isSummarizing {
+            if !aiService.isSummarizing && !aiService.summary.isEmpty {
                 HStack {
                     Spacer()
 
@@ -334,11 +370,38 @@ struct SearchView: View {
 
     // MARK: - Loading View
     private var loadingView: some View {
-        VStack(spacing: 16) {
-            ProgressView()
-                .scaleEffect(1.5)
-            Text(settings.language == .french ? "Recherche sur DuckDuckGo..." : "Searching DuckDuckGo...")
-                .foregroundColor(.secondary)
+        ScrollView {
+            VStack(spacing: 16) {
+                ProgressView()
+                    .scaleEffect(1.5)
+                Text(settings.language == .french ? "Recherche sur DuckDuckGo..." : "Searching DuckDuckGo...")
+                    .foregroundColor(.secondary)
+
+                if !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("First guess")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+
+                        if isGeneratingFirstGuess && firstGuessText.isEmpty {
+                            Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
+                                .foregroundColor(.secondary)
+                                .italic()
+                        } else if !firstGuessText.isEmpty {
+                            LLMStreamView(text: firstGuessText, configuration: llmStreamConfig) { urlString in
+                                guard let url = URL(string: urlString) else { return }
+                                openExternalURL(url)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.accentColor.opacity(0.08))
+                    .cornerRadius(12)
+                }
+            }
+            .padding()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -503,31 +566,56 @@ struct SearchView: View {
         dismissKeyboard()
         #endif
 
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return }
+        searchQuery = trimmedQuery
+
+        let requestID = UUID()
+        activeSearchRequestID = requestID
+
         let resultsCount = maxResults ?? settings.maxSearchResults
         let scrapingChars = maxScrapingChars ?? settings.maxScrapingCharacters
 
         // Clear previous results and state before starting new search
         searchResults = []
         aiService.summary = ""
-        showingSummary = false
+        firstGuessText = ""
+        isGeneratingFirstGuess = false
+        showingSummary = !noAIOnly
         isNoAIMode = noAIOnly
         activeGenerationProfile = generationProfile
+        summaryStartTime = nil
+        summaryElapsedSeconds = nil
         #if DEBUG
         aiService.debugTimings = []
         aiService.debugNotes = []
         #endif
+
+        if !noAIOnly {
+            isGeneratingFirstGuess = true
+            Task {
+                let firstGuess = await aiService.generateFirstGuess(
+                    query: trimmedQuery,
+                    language: settings.language
+                )
+                guard activeSearchRequestID == requestID else { return }
+                firstGuessText = firstGuess
+                isGeneratingFirstGuess = false
+            }
+        }
         
         Task {
             do {
                 let searchLimit = noAIOnly
                     ? resultsCount
                     : resultsCount + Self.aiSummaryOverfetchResults
-                let fetchedResults = try await searchService.search(query: searchQuery, maxResults: searchLimit)
+                let fetchedResults = try await searchService.search(query: trimmedQuery, maxResults: searchLimit)
+                guard activeSearchRequestID == requestID else { return }
                 searchResults = Array(fetchedResults.prefix(resultsCount))
                 errorMessage = nil
 
                 // Auto-generate summary only when AI mode is enabled
-                if !noAIOnly && !searchResults.isEmpty && !showingSummary {
+                if !noAIOnly && !searchResults.isEmpty {
                     showingSummary = true
                     await generateSummary(
                         maxScrapingResults: resultsCount,
@@ -537,8 +625,13 @@ struct SearchView: View {
                     )
                 }
             } catch {
+                guard activeSearchRequestID == requestID else { return }
                 errorMessage = error.localizedDescription
                 searchResults = []
+            }
+
+            if activeSearchRequestID == requestID {
+                isGeneratingFirstGuess = false
             }
         }
     }
@@ -575,10 +668,13 @@ struct SearchView: View {
 
     /// Resets all search and summary state to the initial home screen.
     private func goHome() {
+        activeSearchRequestID = UUID()
         searchQuery = ""
         searchResults = []
         showingSummary = false
         isNoAIMode = false
+        firstGuessText = ""
+        isGeneratingFirstGuess = false
         aiService.summary = ""
         errorMessage = nil
         summaryStartTime = nil

@@ -51,6 +51,56 @@ class AIService: ObservableObject {
     private static let fastSummaryTargetWordCount = 180
     private static let deepSummaryTargetWordCount = 220
 
+    /// Generates a tiny no-context intuition to provide immediate feedback.
+    func generateFirstGuess(
+        query: String,
+        language: ModelLanguage = .french,
+        temperature: Double = 0.2,
+        maxTokens: Int = 50
+    ) async -> String {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return "" }
+
+        do {
+            let session = LanguageModelSession(instructions: buildFirstGuessInstructions(for: language))
+            let prompt: String
+            if language == .french {
+                prompt = """
+                Question: \(trimmedQuery)
+
+                Réponds de manière courte, précise et factuelle.
+                Réponds en français.
+                Réponds en une phrase maximum.
+                """
+            } else {
+                prompt = """
+                Question: \(trimmedQuery)
+
+                Answer in a short, precise and factual manner.
+                Answer in English.
+                Answer in one sentence maximum.
+                """
+            }
+
+            let options = GenerationOptions(
+                temperature: temperature,
+                maximumResponseTokens: maxTokens
+            )
+
+            let response = try await session.respond(to: prompt, options: options)
+            let content = String(describing: response.content)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if content.isEmpty {
+                return fallbackFirstGuess(for: trimmedQuery, language: language)
+            }
+
+            return content
+        } catch {
+            return fallbackFirstGuess(for: trimmedQuery, language: language)
+        }
+    }
+
     /// Summarize search results using Foundation Models or fallback to NLP.
     ///
     /// The Search Assist flow uses the same chunking/relevance selection pipeline as chat.
@@ -180,6 +230,30 @@ class AIService: ObservableObject {
         Give a direct answer, then 1 to 3 key points.
         If information is uncertain, state it explicitly.
         """
+    }
+
+    /// Builds instructions for an ultra-short first-guess response.
+    private func buildFirstGuessInstructions(for language: ModelLanguage) -> String {
+        if language == .french {
+            return """
+            Vous êtes un assistant de chat utile. Répondez clairement et précisément.
+            Répondez en français.
+            """
+        }
+
+        return """
+        You are a helpful chat assistant. Answer the user clearly and accurately.
+        Respond in english.
+        """
+    }
+
+    /// Fallback guess used when on-device generation is unavailable.
+    private func fallbackFirstGuess(for query: String, language: ModelLanguage) -> String {
+        if language == .french {
+            return "Intuition rapide : la réponse dépend du contexte exact. Je lance une vérification web pour confirmer les points clés sur \"\(query)\"."
+        }
+
+        return "Quick intuition: the answer depends on the exact context. I am checking web sources to confirm the key points about \"\(query)\"."
     }
 
     /// Generates the final summary through Foundation Models with context budgeting.
