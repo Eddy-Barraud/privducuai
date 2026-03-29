@@ -1,0 +1,17 @@
+Conversation:
+{{history}}
+
+Retrieved Context:
+{{context}}
+
+User question:
+{{question}}
+
+Answer in a concise and practical way.
+When relevant, include mathematical expressions or formulas.
+Required output format: LaTeX for mathematical expressions.
+Math format requirements:
+- Use $...$ for inline math.
+- Use \[...\] for block math.
+- Use simple LaTeX compatible with the app renderer.
+- Never use environments with \begin{.

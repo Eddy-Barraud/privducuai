@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import LLMStream
+import LaTeXSwiftUI
 #if os(macOS)
 import AppKit
 #elseif canImport(UIKit)
@@ -40,27 +40,6 @@ struct SearchView: View {
     @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
     
-    private var llmCustomColorConfig: ColorConfiguration {
-        ColorConfiguration(
-        textColor: colorScheme == .dark ? .white : .black,
-        backgroundColor: .clear,
-        codeBackgroundColor: Color(red: 0.15, green: 0.15, blue: 0.15),
-        codeBorderColor: .black,
-        linkColor: Color(red: 0.29, green: 0.60, blue: 1.0),
-        thoughtBackgroundColor: Color.gray.opacity(0.8),
-        tableHeaderBackgroundColor: Color.gray.opacity(0.5),
-        tableBorderColor: .black,
-        tableRowEvenColor: .black,
-        tableRowHoverColor: .black,
-        theoremBorderColor: Color(red: 0.29, green: 0.60, blue: 1.0),
-        proofBorderColor: .black
-    )
-    }
-
-    private var llmStreamConfig: LLMStreamConfiguration {
-        LLMStreamConfiguration(colors: llmCustomColorConfig)
-    }
-
     private var windowBackgroundColor: Color {
         #if os(macOS)
         return Color(NSColor.windowBackgroundColor)
@@ -284,11 +263,10 @@ struct SearchView: View {
                         .foregroundColor(.secondary)
                         .italic()
                 } else if !firstGuessText.isEmpty {
-                    LLMStreamView(text: firstGuessText, configuration: llmStreamConfig) { urlString in
-                        guard let url = URL(string: urlString) else { return }
-                        openExternalURL(url)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    LaTeX(firstGuessText)
+                        .font(.body)
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
                         .foregroundColor(.secondary)
@@ -308,11 +286,10 @@ struct SearchView: View {
                         .foregroundColor(.secondary)
                         .italic()
                 } else if !aiService.summary.isEmpty {
-                    LLMStreamView(text: aiService.summary, configuration: llmStreamConfig) { urlString in
-                        guard let url = URL(string: urlString) else { return }
-                        openExternalURL(url)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    LaTeX(aiService.summary)
+                        .font(.body)
+                        .foregroundColor(colorScheme == .dark ? .white : .black)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 } else {
                     Text(settings.language == .french ? "Réponse avec contexte web en attente..." : "Waiting for web-context answer...")
                         .foregroundColor(.secondary)
@@ -388,11 +365,10 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            LLMStreamView(text: firstGuessText, configuration: llmStreamConfig) { urlString in
-                                guard let url = URL(string: urlString) else { return }
-                                openExternalURL(url)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                            LaTeX(firstGuessText)
+                                .font(.body)
+                                .foregroundColor(colorScheme == .dark ? .white : .black)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
                     .padding()
@@ -527,14 +503,6 @@ struct SearchView: View {
         .padding()
         .background(controlBackgroundColor)
         .cornerRadius(12)
-    }
-
-    private func openExternalURL(_ url: URL) {
-        #if os(macOS)
-        NSWorkspace.shared.open(url)
-        #elseif canImport(UIKit)
-        UIApplication.shared.open(url)
-        #endif
     }
 
     #if canImport(UIKit)

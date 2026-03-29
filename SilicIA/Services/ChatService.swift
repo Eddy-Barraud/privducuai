@@ -343,24 +343,20 @@ final class ChatService: ObservableObject {
             }
             .joined(separator: "\n")
 
-        return """
-        Conversation:
-        \(history)
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(userMessage)
+        let language: ModelLanguage = recognizer.dominantLanguage == .french ? .french : .english
 
-        Retrieved Context:
-        \(selectedContext)
-
-        User question:
-        \(userMessage)
-
-        Answer in a concise and practical way.
-        When relevant, include mathematical expressions or formulas.
-        Math format requirements:
-        - Use $...$ for inline math.
-        - Use \\[...\\] for block math.
-        - Use simple LaTeX compatible with MathJax/LLMStream.
-        - Never use environments with \\begin{.
-        """
+        return PromptLoader.loadPrompt(
+            mode: "normal",
+            feature: "chat",
+            language: language,
+            replacements: [
+                "history": history,
+                "context": selectedContext,
+                "question": userMessage
+            ]
+        ) ?? fallbackChatPrompt(history: history, selectedContext: selectedContext, userMessage: userMessage, language: language)
     }
 
     /// Removes citation blocks from assistant messages before they are reused as conversation history.
@@ -389,8 +385,13 @@ final class ChatService: ObservableObject {
     private func buildInstructions(for userMessage: String) -> String {
         let recognizer = NLLanguageRecognizer()
         recognizer.processString(userMessage)
-        let language = recognizer.dominantLanguage
+        let language: ModelLanguage = recognizer.dominantLanguage == .french ? .french : .english
 
+        return PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
+            ?? fallbackChatInstructions(for: language)
+    }
+
+    private func fallbackChatInstructions(for language: ModelLanguage) -> String {
         if language == .french {
             return """
             Vous êtes un assistant de chat utile. Répondez clairement et précisément.
@@ -403,6 +404,55 @@ final class ChatService: ObservableObject {
         You are a helpful chat assistant. Answer the user clearly and accurately.
         Use retrieved context when relevant and mention uncertainty when context is insufficient.
         Respond in the same language as the user's latest question.
+        """
+    }
+
+    private func fallbackChatPrompt(
+        history: String,
+        selectedContext: String,
+        userMessage: String,
+        language: ModelLanguage
+    ) -> String {
+        if language == .french {
+            return """
+            Conversation :
+            \(history)
+
+            Contexte récupéré :
+            \(selectedContext)
+
+            Question de l'utilisateur :
+            \(userMessage)
+
+            Réponds de façon concise et pratique.
+            Quand c'est pertinent, inclus des expressions ou formules mathématiques.
+            Format de sortie attendu : LaTeX pour les expressions mathématiques.
+            Règles de format math :
+            - Utilise $...$ pour l'inline.
+            - Utilise \\[...\\] pour les blocs.
+            - Utilise un LaTeX simple compatible avec le rendu de l'application.
+            - N'utilise jamais d'environnements \\begin{.
+            """
+        }
+
+        return """
+        Conversation:
+        \(history)
+
+        Retrieved Context:
+        \(selectedContext)
+
+        User question:
+        \(userMessage)
+
+        Answer in a concise and practical way.
+        When relevant, include mathematical expressions or formulas.
+        Required output format: LaTeX for mathematical expressions.
+        Math format requirements:
+        - Use $...$ for inline math.
+        - Use \\[...\\] for block math.
+        - Use simple LaTeX compatible with the app renderer.
+        - Never use environments with \\begin{.
         """
     }
 }
