@@ -20,6 +20,9 @@ The app bundles context-aware chat experience, scraping web content, analyzing P
 
 SilicIA (Privacy + AI LLM) is a native macOS application that provides a DuckDuckGo assistant experience similar to Perplexica, but optimized for Apple Silicon Macs. It combines efficient web search with on-device LLM summarization to help you find and understand information quickly without draining your battery.
 
+![Example usage asking the Factorial function](Screenshots/Factorial.png)
+
+
 ### How It Works
 
 1. **Search**: Enter your query in the search bar
