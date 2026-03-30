@@ -27,6 +27,7 @@ final class ChatService: ObservableObject {
     @Published var contextAnalysisProgress = 0.0
 
     private let webScraper = WebScrapingService()
+    private let webSearchService = DuckDuckGoService()
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
@@ -66,7 +67,8 @@ final class ChatService: ObservableObject {
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
-            includeWebSearch: includeWebSearch
+            includeWebSearch: includeWebSearch,
+            searchQuerySeed: includeWebSearch ? message : ""
         )
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
@@ -82,6 +84,7 @@ final class ChatService: ObservableObject {
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
                 includeWebSearch: includeWebSearch,
+                currentMessage: message,
                 maxContextTokens: maxContextTokens
             )
             preAnalyzedContextKey = contextKey
@@ -138,7 +141,8 @@ final class ChatService: ObservableObject {
         let contextKey = makeContextKey(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
-            includeWebSearch: includeWebSearch
+            includeWebSearch: includeWebSearch,
+            searchQuerySeed: ""
         )
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
@@ -160,6 +164,7 @@ final class ChatService: ObservableObject {
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
+            currentMessage: "",
             maxContextTokens: maxContextTokens,
             reportProgress: true
         )
@@ -186,6 +191,7 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
+        currentMessage: String = "",
         maxContextTokens: Int,
         reportProgress: Bool = false
     ) async -> [RAGChunk] {
@@ -201,7 +207,16 @@ final class ChatService: ObservableObject {
             }
         }
 
-        let urls = includeWebSearch ? extractURLs(from: contextInput) : []
+        let contextURLs = extractURLs(from: contextInput)
+        var discoveredURLs: [String] = []
+        if includeWebSearch && !currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let searchQuery = buildWebSearchQuery(
+                currentMessage: currentMessage,
+                contextInput: contextInput
+            )
+            discoveredURLs = await discoverWebURLs(for: searchQuery)
+        }
+        let urls = deduplicatedURLs(contextURLs + discoveredURLs)
         let uniquePDFs = Array(Set(pdfURLs))
         let totalWorkItems = max(urls.count + uniquePDFs.count, 1)
         var completedWorkItems = 0
@@ -253,16 +268,63 @@ final class ChatService: ObservableObject {
         return chunks
     }
 
+    private func buildWebSearchQuery(currentMessage: String, contextInput: String) -> String {
+        let recentMessages = messages.suffix(4)
+            .filter { $0.role == .user || $0.role == .assistant }
+            .map(\.content)
+            .joined(separator: " ")
+
+        let combined = [
+            currentMessage.trimmingCharacters(in: .whitespacesAndNewlines),
+            recentMessages.trimmingCharacters(in: .whitespacesAndNewlines),
+            contextInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        ]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        return String(combined.prefix(500))
+    }
+
+    private func discoverWebURLs(for query: String) async -> [String] {
+        let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty else { return [] }
+
+        do {
+            let results = try await webSearchService.search(query: trimmedQuery, maxResults: Self.maxWebContextURLs)
+            let urls = results.map(\.url).filter {
+                guard let scheme = URL(string: $0)?.scheme?.lowercased() else { return false }
+                return scheme == "http" || scheme == "https"
+            }
+            return Array(Set(urls))
+        } catch {
+            debugContext("discoverWebURLs failed for query=\"\(trimmedQuery)\": \(error.localizedDescription)")
+            return []
+        }
+    }
+
     /// Returns a stable key used to reuse pre-analyzed context.
-    private func makeContextKey(contextInput: String, pdfURLs: [URL], includeWebSearch: Bool) -> String {
+    private func makeContextKey(
+        contextInput: String,
+        pdfURLs: [URL],
+        includeWebSearch: Bool,
+        searchQuerySeed: String
+    ) -> String {
         let normalizedContext = contextInput
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
         let normalizedPDFPaths = Array(Set(pdfURLs.map(\.path))).sorted().joined(separator: "|")
-        if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty {
+        let normalizedQuerySeed = includeWebSearch
+            ? searchQuerySeed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            : ""
+        if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)"
+    }
+
+    private func deduplicatedURLs(_ urls: [String]) -> [String] {
+        var seen = Set<String>()
+        return urls.filter { seen.insert($0).inserted }
     }
 
     /// Extracts unique HTTP(S) URLs from free-form text.
