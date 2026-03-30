@@ -30,6 +30,7 @@ struct ChatView: View {
     @State private var showSettings = false
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
+    @State private var isWebSearchEnabled = false
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -358,6 +359,13 @@ struct ChatView: View {
                     showFileImporter = true
                 }
                 .buttonStyle(.bordered)
+                Button {
+                    isWebSearchEnabled.toggle()
+                } label: {
+                    Label("Web", systemImage: "globe")
+                }
+                .buttonStyle(.bordered)
+                .tint(isWebSearchEnabled ? .accentColor : .secondary)
             }
 
             ForEach(Array(contextSources.enumerated()), id: \.element.id) { index, source in
@@ -458,6 +466,7 @@ struct ChatView: View {
                 message,
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
+                includeWebSearch: isWebSearchEnabled,
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
@@ -667,6 +676,7 @@ struct ChatView: View {
             await chatService.preAnalyzeContext(
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
+                includeWebSearch: isWebSearchEnabled,
                 maxContextTokens: settings.maxContextTokens
             )
         }
@@ -677,6 +687,7 @@ struct ChatView: View {
         preanalysisTask?.cancel()
         messageInput = ""
         contextSources = [ContextSource(kind: .url(text: ""))]
+        isWebSearchEnabled = false
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
         chatService.resetConversation()

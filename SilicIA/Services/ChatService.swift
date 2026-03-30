@@ -51,6 +51,7 @@ final class ChatService: ObservableObject {
         _ message: String,
         contextInput: String,
         pdfURLs: [URL],
+        includeWebSearch: Bool,
         language: ModelLanguage,
         temperature: Double,
         maxResponseTokens: Int,
@@ -62,7 +63,11 @@ final class ChatService: ObservableObject {
         isResponding = true
         defer { isResponding = false }
 
-        let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
+        let contextKey = makeContextKey(
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            includeWebSearch: includeWebSearch
+        )
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
@@ -76,6 +81,7 @@ final class ChatService: ObservableObject {
             chunks = await collectChunks(
                 contextInput: contextInput,
                 pdfURLs: pdfURLs,
+                includeWebSearch: includeWebSearch,
                 maxContextTokens: maxContextTokens
             )
             preAnalyzedContextKey = contextKey
@@ -128,8 +134,12 @@ final class ChatService: ObservableObject {
     }
 
     /// Pre-analyzes context in the background so send-time latency remains low.
-    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], maxContextTokens: Int) async {
-        let contextKey = makeContextKey(contextInput: contextInput, pdfURLs: pdfURLs)
+    func preAnalyzeContext(contextInput: String, pdfURLs: [URL], includeWebSearch: Bool, maxContextTokens: Int) async {
+        let contextKey = makeContextKey(
+            contextInput: contextInput,
+            pdfURLs: pdfURLs,
+            includeWebSearch: includeWebSearch
+        )
         if contextKey.isEmpty {
             preAnalyzedContextKey = nil
             preAnalyzedChunks = []
@@ -149,6 +159,7 @@ final class ChatService: ObservableObject {
         let chunks = await collectChunks(
             contextInput: contextInput,
             pdfURLs: pdfURLs,
+            includeWebSearch: includeWebSearch,
             maxContextTokens: maxContextTokens,
             reportProgress: true
         )
@@ -174,6 +185,7 @@ final class ChatService: ObservableObject {
     private func collectChunks(
         contextInput: String,
         pdfURLs: [URL],
+        includeWebSearch: Bool,
         maxContextTokens: Int,
         reportProgress: Bool = false
     ) async -> [RAGChunk] {
@@ -189,7 +201,7 @@ final class ChatService: ObservableObject {
             }
         }
 
-        let urls = extractURLs(from: contextInput)
+        let urls = includeWebSearch ? extractURLs(from: contextInput) : []
         let uniquePDFs = Array(Set(pdfURLs))
         let totalWorkItems = max(urls.count + uniquePDFs.count, 1)
         var completedWorkItems = 0
@@ -242,7 +254,7 @@ final class ChatService: ObservableObject {
     }
 
     /// Returns a stable key used to reuse pre-analyzed context.
-    private func makeContextKey(contextInput: String, pdfURLs: [URL]) -> String {
+    private func makeContextKey(contextInput: String, pdfURLs: [URL], includeWebSearch: Bool) -> String {
         let normalizedContext = contextInput
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -250,7 +262,7 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)"
     }
 
     /// Extracts unique HTTP(S) URLs from free-form text.
