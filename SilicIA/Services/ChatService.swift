@@ -38,7 +38,6 @@ final class ChatService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     private static let pdfChunkMaxTokens = 220
     private static let pdfChunkOverlapTokens = 30
-    private static let contextSelectionOutputReserveTokens = 1100
     private static let minWebScrapingCharacters = 1500
     private static let maxWebScrapingCharacters = 12000
     private static let maxRecentMessagesForWebSearch = 4
@@ -97,13 +96,24 @@ final class ChatService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
-            maxOutputTokens: Self.contextSelectionOutputReserveTokens,
+            maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
         let contextTokenCap = clampContextTokens(maxContextTokens)
-        let contextWordEstimate = TokenBudgeting.estimatedContextWords(forTokens: contextTokenCap)
-        let contextCharacterCap = TokenBudgeting.estimatedContextCharacters(forTokens: contextTokenCap)
-        let cappedSelectedContext = String(selected.selectedContext.prefix(contextCharacterCap))
+        let maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
+            maxOutputTokens: effectiveMaxOutputTokens,
+            contextUtilizationFactor: 1.0
+        )
+        let effectiveContextTokenCap = min(
+            contextTokenCap,
+            TokenBudgeting.estimatedTokens(forApproxCharacters: maxPromptContextCharacters)
+        )
+        let contextWordEstimate = TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokenCap)
+        let contextCharacterCap = min(
+            TokenBudgeting.estimatedContextCharacters(forTokens: effectiveContextTokenCap),
+            maxPromptContextCharacters
+        )
+        let cappedSelectedContext = String(selected.selectedContext.prefix(max(contextCharacterCap, 0)))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let wordLimitedSelectedContext = TokenBudgeting.truncateToApproxWordCount(
             selected.selectedContext,
@@ -118,13 +128,12 @@ final class ChatService: ObservableObject {
             let instructions = buildInstructions(for: language)
             let session = LanguageModelSession(instructions: instructions)
             let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
-            let maxOutputSentences = TokenBudgeting.estimatedOutputSentences(forTokens: effectiveMaxOutputTokens)
             let prompt = buildPrompt(
                 for: message,
                 selectedContext: finalSelectedContext,
                 language: language,
                 maxOutputCharacters: maxOutputCharacters,
-                maxOutputSentences: maxOutputSentences
+                maxOutputTokens: effectiveMaxOutputTokens
             )
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let response = try await session.respond(to: prompt, options: options)
@@ -495,7 +504,7 @@ final class ChatService: ObservableObject {
         selectedContext: String,
         language: ModelLanguage,
         maxOutputCharacters: Int,
-        maxOutputSentences: Int
+        maxOutputTokens: Int
     ) -> String {
         let historyMessages: [ChatMessage]
         if let last = messages.last, last.role == .user, last.content == userMessage {
@@ -523,7 +532,7 @@ final class ChatService: ObservableObject {
                 "context": selectedContext,
                 "question": userMessage,
                 "maxOutputCharacters": "\(maxOutputCharacters)",
-                "maxOutputSentences": "\(maxOutputSentences)"
+                "maxOutputTokens": "\(maxOutputTokens)"
             ]
         ) ?? fallbackChatPrompt(
             history: history,
@@ -531,7 +540,7 @@ final class ChatService: ObservableObject {
             userMessage: userMessage,
             language: language,
             maxOutputCharacters: maxOutputCharacters,
-            maxOutputSentences: maxOutputSentences
+            maxOutputTokens: maxOutputTokens
         )
     }
 
@@ -601,7 +610,7 @@ final class ChatService: ObservableObject {
         userMessage: String,
         language: ModelLanguage,
         maxOutputCharacters: Int,
-        maxOutputSentences: Int
+        maxOutputTokens: Int
     ) -> String {
         if language == .french {
             return """
@@ -615,7 +624,7 @@ final class ChatService: ObservableObject {
             \(userMessage)
 
             Réponds de façon concise et pratique.
-            Limite de sortie : environ \(maxOutputSentences) phrases courtes maximum (environ \(maxOutputCharacters) caractères).
+            Limite de sortie : \(maxOutputTokens) tokens maximum (environ \(maxOutputCharacters) caractères).
             Quand c'est pertinent, inclus des expressions ou formules mathématiques.
             Format de sortie attendu : LaTeX pour les expressions mathématiques.
             Règles de format math :
@@ -637,7 +646,7 @@ final class ChatService: ObservableObject {
         \(userMessage)
 
         Answer in a concise and practical way.
-        Output limit: about \(maxOutputSentences) short sentences maximum (about \(maxOutputCharacters) characters).
+        Output limit: \(maxOutputTokens) tokens maximum (about \(maxOutputCharacters) characters).
         When relevant, include mathematical expressions or formulas.
         Required output format: LaTeX for mathematical expressions.
         Math format requirements:

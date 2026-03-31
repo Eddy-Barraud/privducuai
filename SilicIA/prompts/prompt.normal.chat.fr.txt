@@ -8,7 +8,7 @@ Question de l'utilisateur :
 {{question}}
 
 Réponds de façon concise et pratique.
-Limite de sortie : {{maxOutputSentences}} phrases courtes maximum (environ {{maxOutputCharacters}} caractères).
+Limite de sortie : {{maxOutputTokens}} tokens maximum (environ {{maxOutputCharacters}} caractères).
 Quand c'est pertinent, inclus des expressions ou formules mathématiques.
 Format de sortie attendu : texte concis avec du LaTeX léger quand utile.
 Formats math autorisés : inline $...$ et bloc simple \\[...\\].

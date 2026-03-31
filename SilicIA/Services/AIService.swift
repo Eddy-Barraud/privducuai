@@ -43,8 +43,6 @@ class AIService: ObservableObject {
     private static let webChunkOverlapTokens = 40
     private static let fastSummaryContextUtilizationFactor = 0.50
     private static let deepSummaryContextUtilizationFactor = 0.65
-    private static let fastSummaryTargetWordCount = 180
-    private static let deepSummaryTargetWordCount = 220
 
     init(initialFirstGuessLanguage: ModelLanguage = .french) {
         self.firstGuessSessionLanguage = initialFirstGuessLanguage
@@ -284,7 +282,6 @@ class AIService: ObservableObject {
             let session = LanguageModelSession(instructions: instructions)
 
             let isDeepProfile = profile == .deep
-            let targetWordCount = isDeepProfile ? Self.deepSummaryTargetWordCount : Self.fastSummaryTargetWordCount
 
             // Token budget for the final summary.
             let effectiveMaxTokens = TokenBudgeting.clampedOutputTokens(
@@ -331,7 +328,7 @@ class AIService: ObservableObject {
                 replacements: [
                     "query": query,
                     "context": selectedContext,
-                    "targetWordCount": "\(targetWordCount)",
+                    "maxOutputTokens": "\(effectiveMaxTokens)",
                     "keyPointsRange": isDeepProfile ? "4 to 6" : "1 to 3",
                     "keyPointsRangeFr": isDeepProfile ? "4 à 6" : "1 à 3"
                 ]
@@ -340,7 +337,7 @@ class AIService: ObservableObject {
                 context: selectedContext,
                 language: language,
                 isDeepProfile: isDeepProfile,
-                targetWordCount: targetWordCount
+                maxOutputTokens: effectiveMaxTokens
             )
 
             #if DEBUG
@@ -486,7 +483,7 @@ class AIService: ObservableObject {
         context: String,
         language: ModelLanguage,
         isDeepProfile: Bool,
-        targetWordCount: Int
+        maxOutputTokens: Int
     ) -> String {
         if language == .french {
             return """
@@ -498,7 +495,7 @@ class AIService: ObservableObject {
             Réponds avec :
             1. Une réponse directe.
             2. \(isDeepProfile ? "4 à 6" : "1 à 3") points clés.
-            Limite : ~\(targetWordCount) mots.
+            Limite : \(maxOutputTokens) tokens maximum.
             Format de sortie attendu : LaTeX pour les expressions mathématiques.
             Quand c'est pertinent, inclus des formules mathématiques avec du LaTeX simple.
             Format math attendu: inline avec $...$ et blocs avec \\[...\\].
@@ -515,7 +512,7 @@ class AIService: ObservableObject {
         Respond with:
         1. A direct answer.
         2. \(isDeepProfile ? "4 to 6" : "1 to 3") key points.
-        Limit: about \(targetWordCount) words.
+        Limit: \(maxOutputTokens) tokens maximum.
         Required output format: LaTeX for mathematical expressions.
         When relevant, include mathematical formulas in simple LaTeX.
         Required math format: use $...$ inline and \\[...\\].

@@ -573,18 +573,28 @@ struct ChatView: View {
 
     /// Adds incoming shared URLs/PDFs to context rows once.
     private func mergeSharedInputsIfNeeded() {
-        if !sharedURLs.isEmpty {
-            for url in sharedURLs where !url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                contextSources.append(ContextSource(kind: .url(text: url)))
-            }
-            sharedURLs.removeAll()
-        }
-        if !sharedPDFs.isEmpty {
-            appendPDFSources(sharedPDFs)
-            sharedPDFs.removeAll()
-        }
-        normalizeContextSources()
+        let incomingURLs = sharedURLs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let incomingPDFs = sharedPDFs.filter { $0.pathExtension.lowercased() == "pdf" }
+        guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty else { return }
+
+        startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs)
+        sharedURLs.removeAll()
+        sharedPDFs.removeAll()
         scheduleContextPreanalysis()
+    }
+
+    private func startNewConversationFromSharedInputs(urls: [String], pdfs: [URL]) {
+        preanalysisTask?.cancel()
+        messageInput = ""
+        isWebSearchEnabled = false
+        chatService.resetConversation()
+
+        var newSources: [ContextSource] = urls.map { ContextSource(kind: .url(text: $0)) }
+        newSources.append(contentsOf: pdfs.map { ContextSource(kind: .pdf(url: $0)) })
+        contextSources = newSources
+        normalizeContextSources()
     }
 
     /// Inserts a PDF source while keeping URL placeholder behavior.

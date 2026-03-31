@@ -17,6 +17,8 @@ import UIKit
 struct SearchView: View {
     private static let aiSummaryOverfetchResults = 3
     @Environment(\.colorScheme) private var colorScheme
+    let initialQuery: String?
+    let onInitialQueryHandled: (() -> Void)?
 
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
@@ -41,6 +43,11 @@ struct SearchView: View {
     @State private var isGeneratingFirstGuess = false
     @State private var activeSearchRequestID = UUID()
     @State private var didCopySummary = false
+
+    init(initialQuery: String? = nil, onInitialQueryHandled: (() -> Void)? = nil) {
+        self.initialQuery = initialQuery
+        self.onInitialQueryHandled = onInitialQueryHandled
+    }
     
     private var windowBackgroundColor: Color {
         #if os(macOS)
@@ -114,9 +121,13 @@ struct SearchView: View {
         .animation(.easeInOut, value: showSettings)
         .onAppear {
             settings = AppSettings.load()
+            consumeInitialQueryIfNeeded()
         }
         .onChange(of: settings) {
             settings.save()
+        }
+        .onChange(of: initialQuery) {
+            consumeInitialQueryIfNeeded()
         }
         #if canImport(UIKit)
         .simultaneousGesture(
@@ -762,6 +773,22 @@ struct SearchView: View {
         aiService.debugTimings = []
         aiService.debugNotes = []
         #endif
+    }
+
+    private func consumeInitialQueryIfNeeded() {
+        guard let initialQuery else { return }
+        let trimmed = initialQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            onInitialQueryHandled?()
+            return
+        }
+        if searchQuery == trimmed && (searchService.isSearching || !searchResults.isEmpty) {
+            onInitialQueryHandled?()
+            return
+        }
+        searchQuery = trimmed
+        onInitialQueryHandled?()
+        performSearch()
     }
 }
 

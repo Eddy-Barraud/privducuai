@@ -18,7 +18,7 @@ struct AppSettings: Codable, Equatable {
     var maxSearchResults: Int = 5
     var maxResponseTokens: Int = 2000
     var temperature: Double = 0.3
-    var maxContextTokens: Int = 4050
+    var maxContextTokens: Int = 3500
     var language: ModelLanguage = .english
 
     private static let storageKey = "SilicIA.AppSettings"
@@ -42,13 +42,13 @@ struct AppSettings: Codable, Equatable {
     /// Loads settings from UserDefaults and falls back to defaults if unavailable.
     static func load() -> AppSettings {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else {
-            return AppSettings()
+            return AppSettings().normalized()
         }
 
         do {
-            return try JSONDecoder().decode(AppSettings.self, from: data)
+            return try JSONDecoder().decode(AppSettings.self, from: data).normalized()
         } catch {
-            return AppSettings()
+            return AppSettings().normalized()
         }
     }
 
@@ -88,7 +88,7 @@ struct AppSettings: Codable, Equatable {
     /// Persists settings in UserDefaults for future launches.
     func save() {
         do {
-            let data = try JSONEncoder().encode(self)
+            let data = try JSONEncoder().encode(normalized())
             UserDefaults.standard.set(data, forKey: Self.storageKey)
         } catch {
             #if DEBUG
@@ -99,7 +99,16 @@ struct AppSettings: Codable, Equatable {
 
     // Value ranges for validation
     static let maxSearchResultsRange = 1...30
-    static let maxResponseTokensRange = 500...4096
+    static let maxResponseTokensRange = 500...3500
     static let temperatureRange = 0.3...1.0
-    static let maxContextTokensRange = 300...4096
+    static let maxContextTokensRange = 300...3500
+
+    private func normalized() -> AppSettings {
+        var copy = self
+        copy.maxSearchResults = min(max(copy.maxSearchResults, Self.maxSearchResultsRange.lowerBound), Self.maxSearchResultsRange.upperBound)
+        copy.maxResponseTokens = min(max(copy.maxResponseTokens, Self.maxResponseTokensRange.lowerBound), Self.maxResponseTokensRange.upperBound)
+        copy.maxContextTokens = min(max(copy.maxContextTokens, Self.maxContextTokensRange.lowerBound), Self.maxContextTokensRange.upperBound)
+        copy.temperature = min(max(copy.temperature, Self.temperatureRange.lowerBound), Self.temperatureRange.upperBound)
+        return copy
+    }
 }

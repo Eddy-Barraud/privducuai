@@ -53,6 +53,10 @@ enum TokenBudgeting {
         max(1, Int((Double(max(words, 0)) * Double(avgCharsPerWord)) / Double(avgCharsPerToken)))
     }
 
+    static func estimatedTokens(forApproxCharacters characters: Int) -> Int {
+        max(0, Int(ceil(Double(max(characters, 0)) / Double(avgCharsPerToken))))
+    }
+
     static func estimatedContextCharacters(forWords words: Int) -> Int {
         max(words, 0) * avgCharsPerWord
     }

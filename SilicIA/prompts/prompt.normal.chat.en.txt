@@ -8,7 +8,7 @@ User question:
 {{question}}
 
 Answer in a concise and practical way.
-Output limit: {{maxOutputSentences}} short sentences maximum (about {{maxOutputCharacters}} characters).
+Output limit: {{maxOutputTokens}} tokens maximum (about {{maxOutputCharacters}} characters).
 When relevant, include mathematical expressions or formulas.
 Output format: concise text with lightweight LaTeX formatting when useful.
 Allowed math formatting: inline $...$ and simple block \\[...\\].

@@ -18,9 +18,9 @@ struct ContentView: View {
     }
 
     @State private var selectedTab: AppTab = .searchAssist
-    @State private var searchResetID = UUID()
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
+    @Binding var pendingSearchQuery: String?
 
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
@@ -38,7 +38,9 @@ struct ContentView: View {
             Group {
                 switch selectedTab {
                 case .searchAssist:
-                    SearchView()
+                    SearchView(initialQuery: pendingSearchQuery, onInitialQueryHandled: {
+                        pendingSearchQuery = nil
+                    })
                 case .chat:
                     ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs)
                 }
@@ -55,10 +57,15 @@ struct ContentView: View {
                 selectedTab = .chat
             }
         }
+        .onChange(of: pendingSearchQuery) {
+            if pendingSearchQuery != nil {
+                selectedTab = .searchAssist
+            }
+        }
     }
 }
 
 #Preview {
-    ContentView(sharedURLs: .constant([]), sharedPDFs: .constant([]))
+    ContentView(sharedURLs: .constant([]), sharedPDFs: .constant([]), pendingSearchQuery: .constant(nil))
         .frame(width: 900, height: 700)
 }

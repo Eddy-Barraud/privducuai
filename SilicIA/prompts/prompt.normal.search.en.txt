@@ -6,6 +6,6 @@ Web context:
 Respond with:
 1. A direct answer.
 2. {{keyPointsRange}} key points.
-Limit: about {{targetWordCount}} words.
+Limit: {{maxOutputTokens}} tokens maximum.
 When relevant, include mathematical formulas.
 Output format required : LaTeX.
