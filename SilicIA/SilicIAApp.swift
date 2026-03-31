@@ -55,13 +55,12 @@ struct SilicIAApp: App {
     /// Routes incoming shared URLs and files to chat context.
     private func handleIncomingURL(_ url: URL) {
         if url.isFileURL, url.pathExtension.lowercased() == "pdf" {
-            sharedPDFs.append(url)
-            sharedPDFs = Array(Set(sharedPDFs))
+            sharedPDFs = [url]
             return
         }
 
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-           url.scheme?.lowercased() == "SilicIA",
+           url.scheme?.lowercased() == "silicia",
            let queryItems = components.queryItems {
             if (components.host?.lowercased() == "search" || components.path.lowercased().contains("search")),
                queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value == nil {
