@@ -546,8 +546,8 @@ struct SearchView: View {
 
                 Text(
                     settings.language == .french
-                    ? "Sortie max estimée : ~\(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
-                    : "Estimated max output: ~\(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
+                    ? "Sortie max estimée : \(estimatedMaxOutputCharacters) caractères (\(estimatedMaxOutputSentences) phrases)"
+                    : "Estimated max output: \(estimatedMaxOutputCharacters) characters (\(estimatedMaxOutputSentences) sentences)"
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
