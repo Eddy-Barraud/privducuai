@@ -35,7 +35,7 @@ final class ChatService: ObservableObject {
     // SwiftData persistence
     var modelContext: ModelContext?
     private var currentConversation: Conversation?
-    private var pendingSaveTask: Task<Void, Never>?
+    @MainActor private var pendingSaveTask: Task<Void, Never>?
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
@@ -50,7 +50,7 @@ final class ChatService: ObservableObject {
     private static let maxWebSearchQueryLength = 500
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
-    private static let saveDebounceNanoseconds: UInt64 = 250_000_000
+    private static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
@@ -735,11 +735,11 @@ final class ChatService: ObservableObject {
     }
 
     /// Debounces persistence writes to avoid saving on every single appended message.
-    private func scheduleContextSave() {
+    @MainActor private func scheduleContextSave() {
         pendingSaveTask?.cancel()
         pendingSaveTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: Self.saveDebounceNanoseconds)
+                try await Task.sleep(nanoseconds: Self.saveDebounceIntervalNanoseconds)
             } catch {
                 return
             }
