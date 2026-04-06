@@ -69,7 +69,7 @@ struct ConversationsListView: View {
                 for conversation in conversations {
                     modelContext.delete(conversation)
                 }
-                try? modelContext.save()
+                _ = saveContext()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
@@ -119,7 +119,7 @@ struct ConversationsListView: View {
 
             Button(action: {
                 modelContext.delete(conversation)
-                try? modelContext.save()
+                _ = saveContext()
             }) {
                 Image(systemName: "trash.fill")
                     .font(.system(size: 14))
@@ -143,6 +143,20 @@ struct ConversationsListView: View {
             return "\(minute)m ago"
         } else {
             return "Just now"
+        }
+    }
+
+    /// Saves the SwiftData context and logs non-fatal failures in debug builds.
+    @discardableResult
+    private func saveContext() -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            #if DEBUG
+            print("[ConversationsListView] Failed to save model context: \(error.localizedDescription)")
+            #endif
+            return false
         }
     }
 }

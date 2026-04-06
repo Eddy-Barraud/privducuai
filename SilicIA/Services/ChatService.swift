@@ -35,6 +35,7 @@ final class ChatService: ObservableObject {
     // SwiftData persistence
     var modelContext: ModelContext?
     private var currentConversation: Conversation?
+    private var pendingSaveTask: Task<Void, Never>?
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
@@ -195,6 +196,7 @@ final class ChatService: ObservableObject {
 
     /// Clears conversation and cached context analysis so a new chat starts cleanly.
     func resetConversation() {
+        pendingSaveTask?.cancel()
         finalizeCurrentConversation()
         messages = []
         errorMessage = nil
@@ -688,8 +690,7 @@ final class ChatService: ObservableObject {
         conversation.messages.append(message)
         conversation.updatedAt = Date()
 
-        // Save context
-        try? modelContext.save()
+        scheduleContextSave()
     }
 
     /// Auto-generates a title from the first user message.
@@ -714,7 +715,36 @@ final class ChatService: ObservableObject {
             }
         }
 
-        try? modelContext.save()
+        pendingSaveTask?.cancel()
+        _ = saveContext(modelContext)
+    }
+
+    /// Saves the current SwiftData context and reports failures in debug builds.
+    @discardableResult
+    private func saveContext(_ modelContext: ModelContext) -> Bool {
+        do {
+            try modelContext.save()
+            return true
+        } catch {
+            #if DEBUG
+            print("[ChatService][Persistence] Failed to save model context: \(error.localizedDescription)")
+            #endif
+            return false
+        }
+    }
+
+    /// Debounces persistence writes to avoid saving on every single appended message.
+    private func scheduleContextSave() {
+        pendingSaveTask?.cancel()
+        pendingSaveTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: 250_000_000)
+            } catch {
+                return
+            }
+            guard let self, let modelContext = self.modelContext else { return }
+            _ = self.saveContext(modelContext)
+        }
     }
 
     /// Loads a previous conversation by ID and syncs it to the UI.
