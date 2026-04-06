@@ -31,6 +31,7 @@ final class PDFChatService: ObservableObject {
     @Published var currentPDF: PDFDocumentInfo?
     @Published var highlightedChunks: [RAGChunk] = []
 
+    private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
     // SwiftData persistence
@@ -39,10 +40,10 @@ final class PDFChatService: ObservableObject {
     private var isCurrentConversationInserted = false
     private var pendingSaveTask: Task<Void, Never>?
 
-    private nonisolated static let pdfChunkMaxTokens = 220
-    private nonisolated static let pdfChunkOverlapTokens = 30
-    private nonisolated static let historyMessageLimit = 6
-    private nonisolated static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
+    private static let pdfChunkMaxTokens = 220
+    private static let pdfChunkOverlapTokens = 30
+    private static let historyMessageLimit = 6
+    private static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
@@ -90,6 +91,7 @@ final class PDFChatService: ObservableObject {
             currentPDF?.loadingStatus = .error(error.localizedDescription)
         }
     }
+
     /// Sends a user message and appends the assistant response with PDF context.
     func sendMessage(
         _ message: String,
@@ -220,51 +222,19 @@ final class PDFChatService: ObservableObject {
 
     // MARK: - Private Methods
 
-    private nonisolated static func processPDF(at url: URL) async throws -> ProcessedPDFData {
-        guard let pdfDocument = PDFKitDocument(url: url) else {
-            throw CocoaError(.fileReadCorruptFile)
-        }
-
-        let pageTexts = try await extractPDFPageTexts(from: pdfDocument)
-        let ragChunker = RAGChunker()
-        var allChunks: [RAGChunk] = []
-
-        for (pageIndex, pageText) in pageTexts.enumerated() {
-            try Task.checkCancellation()
-
-            if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                let chunks = ragChunker.chunk(
-                    text: pageText,
-                    source: url.lastPathComponent,
-                    maxChunkTokens: Self.pdfChunkMaxTokens,
-                    overlapTokens: Self.pdfChunkOverlapTokens,
-                    url: nil,
-                    pdfPage: pageIndex + 1
-                )
-                allChunks.append(contentsOf: chunks)
-            }
-        }
-
-        return ProcessedPDFData(
-            pageCount: pdfDocument.pageCount,
-            extractedChunks: allChunks
-        )
-    }
-
-    private nonisolated static func extractPDFPageTexts(from pdfDocument: PDFKitDocument) async throws -> [String] {
+    private func extractPDFPageTexts(_ pdfDocument: PDFKitDocument) async -> [String] {
         var pageTexts: [String] = []
         pageTexts.reserveCapacity(pdfDocument.pageCount)
 
         for pageIndex in 0..<pdfDocument.pageCount {
-            try Task.checkCancellation()
-            let text = try await extractPageText(from: pdfDocument, pageIndex: pageIndex)
+            let text = await extractPageText(pdfDocument, pageIndex: pageIndex)
             pageTexts.append(text)
         }
 
         return pageTexts
     }
 
-    private nonisolated static func extractPageText(from pdfDocument: PDFKitDocument, pageIndex: Int) async throws -> String {
+    private func extractPageText(_ pdfDocument: PDFKitDocument, pageIndex: Int) async -> String {
         guard let page = pdfDocument.page(at: pageIndex) else { return "" }
 
         // Try direct text extraction first
@@ -273,15 +243,15 @@ final class PDFChatService: ObservableObject {
         }
 
         // Fallback to OCR for image-only pages
-        let pageImage = renderPageAsImage(pdfDocument, pageIndex: pageIndex)
+        let pageImage = await renderPageAsImage(pdfDocument, pageIndex: pageIndex)
         if let image = pageImage {
-            return performOCR(on: image)
+            return await performOCR(on: image)
         }
 
         return ""
     }
 
-    private nonisolated static func renderPageAsImage(_ pdfDocument: PDFKitDocument, pageIndex: Int) -> CGImage? {
+    private func renderPageAsImage(_ pdfDocument: PDFKitDocument, pageIndex: Int) async -> CGImage? {
         let scale = CGFloat(2.0)
         let bounds = CGRect(
             x: 0, y: 0,
@@ -313,7 +283,7 @@ final class PDFChatService: ObservableObject {
         return context.makeImage()
     }
 
-    private nonisolated static func performOCR(on image: CGImage) -> String {
+    private func performOCR(on image: CGImage) async -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLanguages = ["en-US", "fr-FR"]
         request.usesLanguageCorrection = true
@@ -323,7 +293,7 @@ final class PDFChatService: ObservableObject {
         do {
             try handler.perform([request])
 
-            guard let observations = request.results as? [VNRecognizedTextObservation] else {
+            guard let observations = request.results else {
                 return ""
             }
 

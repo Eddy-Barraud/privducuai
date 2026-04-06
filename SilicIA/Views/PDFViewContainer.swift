@@ -273,7 +273,6 @@ struct PDFViewRepresentable: NSViewRepresentable {
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
-        pdfView.allowsDragging = true
         context.coordinator.startObserving(pdfView)
         return pdfView
     }
@@ -308,7 +307,6 @@ struct PDFViewRepresentable: UIViewRepresentable {
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
-        pdfView.allowsDragging = true
         context.coordinator.startObserving(pdfView)
         return pdfView
     }
@@ -325,7 +323,7 @@ struct PDFViewRepresentable: UIViewRepresentable {
 #endif
 
 #Preview {
-    @State var currentPage = 1
+    @Previewable @State var currentPage = 1
 
     return PDFViewContainer(
         pdfURL: nil,

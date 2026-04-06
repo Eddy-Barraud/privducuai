@@ -310,8 +310,8 @@ struct PDFChatContentView: View {
     private func handleDrop(providers: [NSItemProvider]) -> Bool {
         for provider in providers {
             if provider.canLoadObject(ofClass: URL.self) {
-                provider.loadObject(ofClass: URL.self) { url, error in
-                    guard let url = url as? URL else { return }
+                _ = provider.loadObject(ofClass: URL.self) { url, error in
+                    guard let url else { return }
                     // Check if it's actually a PDF
                     guard url.pathExtension.lowercased() == "pdf" else { return }
 
@@ -368,8 +368,8 @@ struct PDFChatContentView: View {
 // MARK: - Preview
 
 #Preview {
-    @State var sharedPDFs: [URL] = []
-    @StateObject var pdfChatService = PDFChatService()
+    @Previewable @State var sharedPDFs: [URL] = []
+    @Previewable @StateObject var pdfChatService = PDFChatService()
 
     return PDFChatContentView(
         pdfChatService: pdfChatService,

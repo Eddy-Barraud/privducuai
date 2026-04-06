@@ -46,8 +46,8 @@ struct PDFViewerView: View {
 }
 
 #Preview {
-    @StateObject var pdfChatService = PDFChatService()
-    @State var sharedPDFs: [URL] = []
+    @Previewable @StateObject var pdfChatService = PDFChatService()
+    @Previewable @State var sharedPDFs: [URL] = []
 
     return PDFViewerView(
         pdfChatService: pdfChatService,

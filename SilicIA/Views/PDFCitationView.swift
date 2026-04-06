@@ -104,7 +104,7 @@ struct PDFCitationView: View {
 }
 
 #Preview {
-    @State var language: ModelLanguage = .english
+    @Previewable @State var language: ModelLanguage = .english
 
     return VStack {
         PDFCitationView(
