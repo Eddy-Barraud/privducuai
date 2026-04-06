@@ -23,7 +23,6 @@ struct PDFChatContentView: View {
     @State private var messageInput = ""
     @State private var settings = AppSettings.load()
     @State private var showSettings = false
-    @State private var isInputFieldFocused = false
     @FocusState private var inputFieldFocus: Bool
 
     @Environment(\.colorScheme) private var colorScheme
@@ -200,6 +199,10 @@ struct PDFChatContentView: View {
                 .cornerRadius(6)
                 .focused($inputFieldFocus)
                 .lineLimit(3...5)
+                .submitLabel(.send)
+                .onSubmit {
+                    sendMessage()
+                }
 
             Button(action: sendMessage) {
                 Image(systemName: "paperplane.fill")

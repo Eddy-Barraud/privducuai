@@ -87,6 +87,7 @@ struct ContentView: View {
         .onChange(of: sharedPDFs) {
             if !sharedPDFs.isEmpty {
                 selectedTab = .pdf
+                pdfChatService.modelContext = modelContext
                 if let pdfURL = sharedPDFs.first {
                     Task {
                         await pdfChatService.loadPDF(pdfURL)

@@ -58,7 +58,7 @@ struct PDFAnswerAnalyzer {
                     in: enhanced,
                     options: [],
                     range: range,
-                    withTemplate: "[page \\1](#page-\(pageNum))"
+                    withTemplate: "[\\1](#page-\(pageNum))"
                 )
             }
         }

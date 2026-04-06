@@ -31,61 +31,50 @@ final class PDFChatService: ObservableObject {
     @Published var currentPDF: PDFDocumentInfo?
     @Published var highlightedChunks: [RAGChunk] = []
 
-    private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
     // SwiftData persistence
     var modelContext: ModelContext?
     private var currentConversation: PDFConversation?
+    private var isCurrentConversationInserted = false
     private var pendingSaveTask: Task<Void, Never>?
 
-    private static let pdfChunkMaxTokens = 220
-    private static let pdfChunkOverlapTokens = 30
-    private static let historyMessageLimit = 6
-    private static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
+    private nonisolated static let pdfChunkMaxTokens = 220
+    private nonisolated static let pdfChunkOverlapTokens = 30
+    private nonisolated static let historyMessageLimit = 6
+    private nonisolated static let saveDebounceIntervalNanoseconds: UInt64 = 250_000_000
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
 
+    private struct ProcessedPDFData: Sendable {
+        let pageCount: Int
+        let extractedChunks: [RAGChunk]
+    }
+
     /// Loads a PDF and extracts its content into chunks.
     func loadPDF(_ url: URL) async {
+        var document = PDFDocumentInfo(url: url)
+        document.loadingStatus = .loading
+        currentPDF = document
+
         do {
-            var document = PDFDocumentInfo(url: url)
-            document.loadingStatus = .loading
-            currentPDF = document
+            let processed = try await Task.detached(priority: .userInitiated) {
+                try await Self.processPDF(at: url)
+            }.value
 
-            guard let pdfDocument = PDFKitDocument(url: url) else {
-                currentPDF?.loadingStatus = .error("Failed to load PDF")
-                return
-            }
-
-            document.pageCount = pdfDocument.pageCount
-            let pageTexts = await extractPDFPageTexts(pdfDocument)
-
-            // Create chunks with page metadata
-            var allChunks: [RAGChunk] = []
-            for (pageIndex, pageText) in pageTexts.enumerated() {
-                if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
-                    let chunks = ragChunker.chunk(
-                        text: pageText,
-                        source: url.lastPathComponent,
-                        maxChunkTokens: Self.pdfChunkMaxTokens,
-                        overlapTokens: Self.pdfChunkOverlapTokens,
-                        url: nil,
-                        pdfPage: pageIndex + 1
-                    )
-                    allChunks.append(contentsOf: chunks)
-                }
-            }
-
-            document.extractedChunks = allChunks
+            document.pageCount = processed.pageCount
+            document.extractedChunks = processed.extractedChunks
             document.loadingStatus = .loaded
             currentPDF = document
-            preAnalyzedChunks = allChunks
+            preAnalyzedChunks = processed.extractedChunks
             preAnalyzedContextKey = url.absoluteString
+            preAnalyzedMaxContextTokens = nil
 
             // Reset conversation for new PDF
             resetConversation(keepCurrentPDFContext: true)
+        } catch is CancellationError {
+            currentPDF?.loadingStatus = .error("PDF loading was cancelled")
         } catch {
             currentPDF?.loadingStatus = .error(error.localizedDescription)
         }
@@ -112,9 +101,10 @@ final class PDFChatService: ObservableObject {
         defer { isResponding = false }
 
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
+        preAnalyzedMaxContextTokens = maxContextTokens
 
         // Use pre-analyzed chunks from PDF
-        let chunks = preAnalyzedChunks
+        let chunks = preAnalyzedChunks.isEmpty ? pdfDocument.extractedChunks : preAnalyzedChunks
 
         let selected = await ragContextService.selectContext(
             chunks: chunks,
@@ -123,9 +113,32 @@ final class PDFChatService: ObservableObject {
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
 
+        let contextTokenCap = clampContextTokens(maxContextTokens)
+        let maxPromptContextCharacters = TokenBudgeting.maxContextCharacters(
+            maxOutputTokens: effectiveMaxOutputTokens,
+            contextUtilizationFactor: 1.0
+        )
+        let effectiveContextTokenCap = min(
+            contextTokenCap,
+            TokenBudgeting.estimatedTokens(forApproxCharacters: maxPromptContextCharacters)
+        )
+        let contextWordEstimate = TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokenCap)
+        let contextCharacterCap = min(
+            TokenBudgeting.estimatedContextCharacters(forTokens: effectiveContextTokenCap),
+            maxPromptContextCharacters
+        )
+        let cappedSelectedContext = String(selected.selectedContext.prefix(max(contextCharacterCap, 0)))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let wordLimitedSelectedContext = TokenBudgeting.truncateToApproxWordCount(
+            selected.selectedContext,
+            maxWords: contextWordEstimate
+        )
+        let finalSelectedContext = wordLimitedSelectedContext.count < cappedSelectedContext.count
+            ? wordLimitedSelectedContext
+            : cappedSelectedContext
+
         // Keep the exact context chunks used for this answer.
         let usedSourceChunks = selected.topChunks.map { $0.chunk }
-        highlightedChunks = usedSourceChunks
 
         do {
             let instructions = buildInstructions(for: language, pdfTitle: pdfDocument.fileName, pageCount: pdfDocument.pageCount)
@@ -133,7 +146,7 @@ final class PDFChatService: ObservableObject {
             let maxOutputCharacters = TokenBudgeting.estimatedOutputCharacters(forTokens: effectiveMaxOutputTokens)
             let prompt = buildPrompt(
                 for: message,
-                selectedContext: selected.selectedContext,
+                selectedContext: finalSelectedContext,
                 language: language,
                 maxOutputCharacters: maxOutputCharacters,
                 maxOutputTokens: effectiveMaxOutputTokens
@@ -141,11 +154,14 @@ final class PDFChatService: ObservableObject {
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
             let response = try await session.respond(to: prompt, options: options)
             let content = normalizeModelOutput(String(describing: response.content))
+            let citationAnalysis = PDFAnswerAnalyzer.analyzeCitations(in: content, sourceChunks: usedSourceChunks)
+            let answerSourceChunks = citationAnalysis.citedChunks.isEmpty ? usedSourceChunks : citationAnalysis.citedChunks
+            highlightedChunks = answerSourceChunks
 
             // Format citations with PDF page numbers
             let citations = RAGCitationFormatter.pdfCitationBlock(from: selected.topChunks, language: language)
 
-            messages.append(ChatMessage(role: .assistant, content: content, citations: citations, sourceChunks: usedSourceChunks))
+            messages.append(ChatMessage(role: .assistant, content: content, citations: citations, sourceChunks: answerSourceChunks))
             persistMessage(role: "assistant", content: content, citations: citations)
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
@@ -174,6 +190,7 @@ final class PDFChatService: ObservableObject {
             preAnalyzedMaxContextTokens = nil
         }
         currentConversation = nil
+        isCurrentConversationInserted = false
     }
 
     /// Clears the current chat and loaded PDF state.
@@ -185,25 +202,59 @@ final class PDFChatService: ObservableObject {
     /// Loads a previous PDF conversation.
     func loadConversation(_ conversation: PDFConversation) {
         currentConversation = conversation
-        messages = conversation.messages.map {
+        isCurrentConversationInserted = true
+        messages = conversation.messages.sorted { $0.timestamp < $1.timestamp }.map {
             ChatMessage(role: $0.role == "user" ? .user : .assistant, content: $0.content, citations: $0.citations)
         }
     }
 
     // MARK: - Private Methods
 
-    private func extractPDFPageTexts(_ pdfDocument: PDFKitDocument) async -> [String] {
+    private nonisolated static func processPDF(at url: URL) async throws -> ProcessedPDFData {
+        guard let pdfDocument = PDFKitDocument(url: url) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        let pageTexts = try await extractPDFPageTexts(from: pdfDocument)
+        let ragChunker = RAGChunker()
+        var allChunks: [RAGChunk] = []
+
+        for (pageIndex, pageText) in pageTexts.enumerated() {
+            try Task.checkCancellation()
+
+            if !pageText.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty {
+                let chunks = ragChunker.chunk(
+                    text: pageText,
+                    source: url.lastPathComponent,
+                    maxChunkTokens: Self.pdfChunkMaxTokens,
+                    overlapTokens: Self.pdfChunkOverlapTokens,
+                    url: nil,
+                    pdfPage: pageIndex + 1
+                )
+                allChunks.append(contentsOf: chunks)
+            }
+        }
+
+        return ProcessedPDFData(
+            pageCount: pdfDocument.pageCount,
+            extractedChunks: allChunks
+        )
+    }
+
+    private nonisolated static func extractPDFPageTexts(from pdfDocument: PDFKitDocument) async throws -> [String] {
         var pageTexts: [String] = []
+        pageTexts.reserveCapacity(pdfDocument.pageCount)
 
         for pageIndex in 0..<pdfDocument.pageCount {
-            let text = await extractPageText(pdfDocument, pageIndex: pageIndex)
+            try Task.checkCancellation()
+            let text = try await extractPageText(from: pdfDocument, pageIndex: pageIndex)
             pageTexts.append(text)
         }
 
         return pageTexts
     }
 
-    private func extractPageText(_ pdfDocument: PDFKitDocument, pageIndex: Int) async -> String {
+    private nonisolated static func extractPageText(from pdfDocument: PDFKitDocument, pageIndex: Int) async throws -> String {
         guard let page = pdfDocument.page(at: pageIndex) else { return "" }
 
         // Try direct text extraction first
@@ -212,15 +263,15 @@ final class PDFChatService: ObservableObject {
         }
 
         // Fallback to OCR for image-only pages
-        let pageImage = await renderPageAsImage(pdfDocument, pageIndex: pageIndex)
+        let pageImage = renderPageAsImage(pdfDocument, pageIndex: pageIndex)
         if let image = pageImage {
-            return await performOCR(on: image)
+            return performOCR(on: image)
         }
 
         return ""
     }
 
-    private func renderPageAsImage(_ pdfDocument: PDFKitDocument, pageIndex: Int) async -> CGImage? {
+    private nonisolated static func renderPageAsImage(_ pdfDocument: PDFKitDocument, pageIndex: Int) -> CGImage? {
         let scale = CGFloat(2.0)
         let bounds = CGRect(
             x: 0, y: 0,
@@ -252,7 +303,7 @@ final class PDFChatService: ObservableObject {
         return context.makeImage()
     }
 
-    private func performOCR(on image: CGImage) async -> String {
+    private nonisolated static func performOCR(on image: CGImage) -> String {
         let request = VNRecognizeTextRequest()
         request.recognitionLanguages = ["en-US", "fr-FR"]
         request.usesLanguageCorrection = true
@@ -331,13 +382,22 @@ final class PDFChatService: ObservableObject {
         let message = Message(role: role, content: content, citations: citations)
 
         if currentConversation == nil {
-            currentConversation = PDFConversation(
+            let conversation = PDFConversation(
                 pdfSourceURL: currentPDF?.url ?? URL(fileURLWithPath: ""),
                 pdfFileName: currentPDF?.fileName ?? "",
                 pdfPageCount: currentPDF?.pageCount ?? 0
             )
             if let title = title(from: content, isUser: role == "user") {
-                currentConversation?.title = title
+                conversation.title = title
+            }
+
+            currentConversation = conversation
+
+            if let context = modelContext {
+                context.insert(conversation)
+                isCurrentConversationInserted = true
+            } else {
+                isCurrentConversationInserted = false
             }
         }
 
@@ -348,12 +408,12 @@ final class PDFChatService: ObservableObject {
 
     private func scheduleContextSave() {
         pendingSaveTask?.cancel()
-        pendingSaveTask = Task {
+        pendingSaveTask = Task { @MainActor in
             let nanoseconds = Self.saveDebounceIntervalNanoseconds
             try? await Task.sleep(nanoseconds: nanoseconds)
 
             guard !Task.isCancelled else { return }
-            await finalizeCurrentConversation()
+            finalizeCurrentConversation()
         }
     }
 
@@ -361,7 +421,10 @@ final class PDFChatService: ObservableObject {
         guard let conversation = currentConversation, let context = modelContext else { return }
 
         do {
-            context.insert(conversation)
+            if !isCurrentConversationInserted {
+                context.insert(conversation)
+                isCurrentConversationInserted = true
+            }
             try context.save()
         } catch {
             errorMessage = "Failed to save conversation: \(error.localizedDescription)"

@@ -78,11 +78,13 @@ struct PDFViewContainer: View {
     }
 
     private func previousPage() {
+        guard pageCount > 0 else { return }
         currentPage = max(1, min(pageCount, currentPage - 1))
         onPageChanged(currentPage)
     }
 
     private func nextPage() {
+        guard pageCount > 0 else { return }
         currentPage = max(1, min(pageCount, currentPage + 1))
         onPageChanged(currentPage)
     }
@@ -271,6 +273,7 @@ struct PDFViewRepresentable: NSViewRepresentable {
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
+        pdfView.allowsDragging = true
         context.coordinator.startObserving(pdfView)
         return pdfView
     }
@@ -305,6 +308,7 @@ struct PDFViewRepresentable: UIViewRepresentable {
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
+        pdfView.allowsDragging = true
         context.coordinator.startObserving(pdfView)
         return pdfView
     }
