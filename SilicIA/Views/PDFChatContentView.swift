@@ -64,6 +64,15 @@ struct PDFChatContentView: View {
 
                 Spacer()
 
+                Button(action: clearPDFSession) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "trash")
+                        Text(settings.language == .french ? "Effacer" : "Clear")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(pdfChatService.currentPDF == nil && pdfChatService.messages.isEmpty)
+
                 if showSettings {
                     Button(action: { showSettings = false }) {
                         Image(systemName: "xmark.circle.fill")
@@ -254,17 +263,27 @@ struct PDFChatContentView: View {
             .background(message.role == .user ? Color.blue.opacity(0.1) : tertiaryBackgroundColor)
             .cornerRadius(6)
 
-            // Citations
-            if let citations = message.citations, message.role == .assistant {
+            // Sources
+            if message.role == .assistant,
+               let sourceChunks = message.sourceChunks,
+               !sourceChunks.isEmpty {
                 PDFCitationView(
-                    citations: citations,
-                    chunks: pdfChatService.highlightedChunks,
+                    citations: message.citations,
+                    chunks: sourceChunks,
                     onCitationTapped: onCitationTapped,
                     language: settings.language
                 )
             }
         }
         .id(message.id)
+    }
+
+    private func clearPDFSession() {
+        messageInput = ""
+        inputFieldFocus = false
+        showSettings = false
+        sharedPDFs.removeAll()
+        pdfChatService.clearCurrentChat()
     }
 
     private func sendMessage() {

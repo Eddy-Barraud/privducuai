@@ -85,7 +85,7 @@ final class PDFChatService: ObservableObject {
             preAnalyzedContextKey = url.absoluteString
 
             // Reset conversation for new PDF
-            resetConversation()
+            resetConversation(keepCurrentPDFContext: true)
         } catch {
             currentPDF?.loadingStatus = .error(error.localizedDescription)
         }
@@ -123,8 +123,9 @@ final class PDFChatService: ObservableObject {
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
 
-        // Update highlighted chunks for UI
-        highlightedChunks = selected.topChunks.map { $0.chunk }
+        // Keep the exact context chunks used for this answer.
+        let usedSourceChunks = selected.topChunks.map { $0.chunk }
+        highlightedChunks = usedSourceChunks
 
         do {
             let instructions = buildInstructions(for: language, pdfTitle: pdfDocument.fileName, pageCount: pdfDocument.pageCount)
@@ -144,7 +145,7 @@ final class PDFChatService: ObservableObject {
             // Format citations with PDF page numbers
             let citations = RAGCitationFormatter.pdfCitationBlock(from: selected.topChunks, language: language)
 
-            messages.append(ChatMessage(role: .assistant, content: content, citations: citations))
+            messages.append(ChatMessage(role: .assistant, content: content, citations: citations, sourceChunks: usedSourceChunks))
             persistMessage(role: "assistant", content: content, citations: citations)
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
@@ -160,17 +161,25 @@ final class PDFChatService: ObservableObject {
     }
 
     /// Clears conversation and cached context.
-    func resetConversation() {
+    func resetConversation(keepCurrentPDFContext: Bool = false) {
         pendingSaveTask?.cancel()
         finalizeCurrentConversation()
         messages = []
         errorMessage = nil
         isResponding = false
         highlightedChunks = []
-        preAnalyzedContextKey = nil
-        preAnalyzedChunks = []
-        preAnalyzedMaxContextTokens = nil
+        if !keepCurrentPDFContext {
+            preAnalyzedContextKey = nil
+            preAnalyzedChunks = []
+            preAnalyzedMaxContextTokens = nil
+        }
         currentConversation = nil
+    }
+
+    /// Clears the current chat and loaded PDF state.
+    func clearCurrentChat() {
+        resetConversation(keepCurrentPDFContext: false)
+        currentPDF = nil
     }
 
     /// Loads a previous PDF conversation.

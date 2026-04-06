@@ -53,6 +53,7 @@ struct PDFViewContainer: View {
                 PDFViewRepresentable(
                     pdfDocument: pdfDocument,
                     currentPage: $currentPage,
+                    highlightedChunks: highlightedChunks,
                     onPageChanged: onPageChanged
                 )
             } else {
@@ -69,21 +70,182 @@ struct PDFViewContainer: View {
             }
         }
         .onAppear {
-            if let pdfURL = pdfURL {
-                pdfDocument = PDFDocument(url: pdfURL)
-                pageCount = pdfDocument?.pageCount ?? 0
-            }
+            loadDocument(from: pdfURL)
+        }
+        .onChange(of: pdfURL) {
+            loadDocument(from: pdfURL)
         }
     }
 
     private func previousPage() {
-        currentPage = max(1, currentPage - 1)
+        currentPage = max(1, min(pageCount, currentPage - 1))
         onPageChanged(currentPage)
     }
 
     private func nextPage() {
-        currentPage += 1
+        currentPage = max(1, min(pageCount, currentPage + 1))
         onPageChanged(currentPage)
+    }
+
+    private func loadDocument(from url: URL?) {
+        guard let url else {
+            pdfDocument = nil
+            pageCount = 0
+            currentPage = 1
+            onPageChanged(currentPage)
+            return
+        }
+
+        let document = PDFDocument(url: url)
+        pdfDocument = document
+        pageCount = document?.pageCount ?? 0
+        currentPage = pageCount > 0 ? 1 : 1
+        onPageChanged(currentPage)
+    }
+}
+
+private enum PDFHighlightConstants {
+    static let annotationOwner = "SilicIA-RAG-Chunk"
+    static let maxSnippetLength = 120
+}
+
+final class PDFViewCoordinator: NSObject {
+    private let setCurrentPage: (Int) -> Void
+    private let onPageChanged: (Int) -> Void
+    private var pageObserver: NSObjectProtocol?
+    private var lastHighlightedChunkID: UUID?
+
+    init(setCurrentPage: @escaping (Int) -> Void, onPageChanged: @escaping (Int) -> Void) {
+        self.setCurrentPage = setCurrentPage
+        self.onPageChanged = onPageChanged
+    }
+
+    deinit {
+        if let pageObserver {
+            NotificationCenter.default.removeObserver(pageObserver)
+        }
+    }
+
+    func startObserving(_ pdfView: PDFView) {
+        if let pageObserver {
+            NotificationCenter.default.removeObserver(pageObserver)
+        }
+
+        pageObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name.PDFViewPageChanged,
+            object: pdfView,
+            queue: .main
+        ) { [weak self] _ in
+            guard
+                let self,
+                let page = pdfView.currentPage,
+                let document = pdfView.document
+            else {
+                return
+            }
+
+            let pageIndex = document.index(for: page) + 1
+            self.setCurrentPage(pageIndex)
+            self.onPageChanged(pageIndex)
+        }
+    }
+
+    func syncViewState(
+        pdfView: PDFView,
+        document: PDFKit.PDFDocument,
+        currentPage: Int,
+        highlightedChunks: [RAGChunk]
+    ) {
+        if pdfView.document !== document {
+            pdfView.document = document
+        }
+
+        let clampedPage = max(1, min(currentPage, document.pageCount))
+        if let page = document.page(at: clampedPage - 1), page != pdfView.currentPage {
+            pdfView.go(to: page)
+        }
+
+        applyHighlight(for: highlightedChunks.first, in: pdfView, document: document)
+    }
+
+    private func applyHighlight(for chunk: RAGChunk?, in pdfView: PDFView, document: PDFKit.PDFDocument) {
+        guard let chunk else {
+            clearManagedHighlights(in: document)
+            lastHighlightedChunkID = nil
+            return
+        }
+
+        if lastHighlightedChunkID == chunk.id {
+            return
+        }
+
+        clearManagedHighlights(in: document)
+        defer { lastHighlightedChunkID = chunk.id }
+
+        guard
+            let pageNumber = chunk.pdfPage,
+            pageNumber > 0,
+            pageNumber <= document.pageCount,
+            let page = document.page(at: pageNumber - 1),
+            let pageText = page.string,
+            let range = bestRangeForChunk(chunk.text, in: pageText)
+        else {
+            return
+        }
+
+        guard let selection = page.selection(for: range) else {
+            return
+        }
+
+        let annotationBounds = selection.bounds(for: page).insetBy(dx: -1, dy: -1)
+        let annotation = PDFAnnotation(bounds: annotationBounds, forType: .highlight, withProperties: nil)
+        #if os(macOS)
+        annotation.color = NSColor.systemYellow.withAlphaComponent(0.4)
+        #elseif canImport(UIKit)
+        annotation.color = UIColor.systemYellow.withAlphaComponent(0.4)
+        #endif
+        annotation.userName = PDFHighlightConstants.annotationOwner
+        page.addAnnotation(annotation)
+
+        pdfView.go(to: page)
+    }
+
+    private func clearManagedHighlights(in document: PDFKit.PDFDocument) {
+        for pageIndex in 0..<document.pageCount {
+            guard let page = document.page(at: pageIndex) else { continue }
+            let annotationsToRemove = page.annotations.filter { annotation in
+                annotation.userName == PDFHighlightConstants.annotationOwner
+            }
+            for annotation in annotationsToRemove {
+                page.removeAnnotation(annotation)
+            }
+        }
+    }
+
+    private func bestRangeForChunk(_ chunkText: String, in pageText: String) -> NSRange? {
+        let normalizedChunk = chunkText
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedChunk.isEmpty else { return nil }
+
+        let candidates: [String] = [
+            normalizedChunk,
+            String(normalizedChunk.prefix(PDFHighlightConstants.maxSnippetLength)),
+            String(normalizedChunk.prefix(80)),
+            String(normalizedChunk.prefix(50))
+        ]
+
+        let pageNSString = pageText as NSString
+        for candidate in candidates {
+            let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let range = pageNSString.range(of: trimmed, options: [.caseInsensitive])
+            if range.location != NSNotFound {
+                return range
+            }
+        }
+
+        return nil
     }
 }
 
@@ -92,44 +254,68 @@ struct PDFViewContainer: View {
 struct PDFViewRepresentable: NSViewRepresentable {
     let pdfDocument: PDFKit.PDFDocument
     @Binding var currentPage: Int
+    let highlightedChunks: [RAGChunk]
     let onPageChanged: (Int) -> Void
+
+    func makeCoordinator() -> PDFViewCoordinator {
+        PDFViewCoordinator(
+            setCurrentPage: { page in
+                currentPage = page
+            },
+            onPageChanged: onPageChanged
+        )
+    }
 
     func makeNSView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
+        context.coordinator.startObserving(pdfView)
         return pdfView
     }
 
     func updateNSView(_ pdfView: PDFView, context: Context) {
-        if currentPage > 0, currentPage <= (pdfDocument.pageCount) {
-            if let page = pdfDocument.page(at: currentPage - 1) {
-                pdfView.go(to: page)
-            }
-        }
+        context.coordinator.syncViewState(
+            pdfView: pdfView,
+            document: pdfDocument,
+            currentPage: currentPage,
+            highlightedChunks: highlightedChunks
+        )
     }
 }
 #elseif canImport(UIKit)
 struct PDFViewRepresentable: UIViewRepresentable {
     let pdfDocument: PDFKit.PDFDocument
     @Binding var currentPage: Int
+    let highlightedChunks: [RAGChunk]
     let onPageChanged: (Int) -> Void
+
+    func makeCoordinator() -> PDFViewCoordinator {
+        PDFViewCoordinator(
+            setCurrentPage: { page in
+                currentPage = page
+            },
+            onPageChanged: onPageChanged
+        )
+    }
 
     func makeUIView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.document = pdfDocument
         pdfView.autoScales = true
         pdfView.displayMode = .singlePageContinuous
+        context.coordinator.startObserving(pdfView)
         return pdfView
     }
 
     func updateUIView(_ pdfView: PDFView, context: Context) {
-        if currentPage > 0, currentPage <= (pdfDocument.pageCount) {
-            if let page = pdfDocument.page(at: currentPage - 1) {
-                pdfView.go(to: page)
-            }
-        }
+        context.coordinator.syncViewState(
+            pdfView: pdfView,
+            document: pdfDocument,
+            currentPage: currentPage,
+            highlightedChunks: highlightedChunks
+        )
     }
 }
 #endif

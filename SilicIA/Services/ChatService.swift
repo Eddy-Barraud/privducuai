@@ -788,10 +788,12 @@ struct ChatMessage: Identifiable {
     let role: Role
     let content: String
     let citations: String?
+    let sourceChunks: [RAGChunk]?
 
-    init(role: Role, content: String, citations: String? = nil) {
+    init(role: Role, content: String, citations: String? = nil, sourceChunks: [RAGChunk]? = nil) {
         self.role = role
         self.content = content
         self.citations = citations
+        self.sourceChunks = sourceChunks
     }
 }

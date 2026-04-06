@@ -29,99 +29,77 @@ struct PDFCitationView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if let citations = citations, !citations.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(language == .french ? "Sources citées" : "Cited Sources")
+            if !chunks.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(language == .french ? "Sources RAG" : "RAG Sources")
                         .font(.caption)
                         .fontWeight(.semibold)
                         .foregroundStyle(.secondary)
                         .textCase(.uppercase)
 
-                    // Parse and render each citation
-                    ForEach(parseCitations(citations), id: \.self) { citationLine in
-                        CitationLineView(
-                            text: citationLine,
-                            chunks: chunks,
-                            language: language,
-                            onCitationTapped: onCitationTapped
-                        )
+                    ForEach(Array(chunks.enumerated()), id: \.element.id) { index, chunk in
+                        Button(action: {
+                            onCitationTapped(chunk)
+                        }) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Text("\(index + 1). \(chunk.source)")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                        .foregroundStyle(.primary)
+                                        .lineLimit(1)
+
+                                    Spacer()
+
+                                    if let page = chunk.pdfPage {
+                                        Text("\(language == .french ? "Page" : "Page") \(page)")
+                                            .font(.caption2)
+                                            .fontWeight(.semibold)
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 4)
+                                            .background(Color.blue)
+                                            .cornerRadius(4)
+                                    }
+                                }
+
+                                Text(chunkPreview(for: chunk.text))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(3)
+                                    .multilineTextAlignment(.leading)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(8)
+                            .background(controlBackgroundColor.opacity(0.8))
+                            .cornerRadius(6)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 .padding(8)
                 .background(controlBackgroundColor)
                 .cornerRadius(6)
+            } else if let citations, !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(citations)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .padding(8)
+                    .background(controlBackgroundColor)
+                    .cornerRadius(6)
             }
         }
     }
 
-    private func parseCitations(_ text: String) -> [String] {
-        text.components(separatedBy: "\n\n").filter { !$0.isEmpty }
-    }
-}
-
-/// Renders a single citation line with interactive page number.
-struct CitationLineView: View {
-    let text: String
-    let chunks: [RAGChunk]
-    let language: ModelLanguage
-    let onCitationTapped: (RAGChunk) -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            // Extract page number if present
-            if let pageNumber = extractPageNumber(from: text) {
-                let sourceText = text.components(separatedBy: " — ")[0]
-
-                HStack(spacing: 8) {
-                    Text(sourceText)
-                        .font(.caption)
-                        .foregroundStyle(.primary)
-
-                    Spacer()
-
-                    Button(action: {
-                        // Find matching chunk and trigger highlight
-                        if let chunk = findChunkForPage(pageNumber) {
-                            onCitationTapped(chunk)
-                        }
-                    }) {
-                        Text("Page \(pageNumber)")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color.blue)
-                            .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    .onHover { hovering in
-                        isHovering = hovering
-                    }
-                }
-            } else {
-                Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.primary)
-            }
+    private func chunkPreview(for text: String) -> String {
+        let normalized = text
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let maxPreviewLength = 220
+        if normalized.count <= maxPreviewLength {
+            return normalized
         }
-        .contentShape(Rectangle())
-    }
-
-    private func extractPageNumber(from text: String) -> Int? {
-        let pattern = language == .french ? "Page (\\d+)" : "Page (\\d+)"
-        if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-           let match = regex.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)),
-           let range = Range(match.range(at: 1), in: text) {
-            return Int(text[range])
-        }
-        return nil
-    }
-
-    private func findChunkForPage(_ pageNumber: Int) -> RAGChunk? {
-        chunks.first { $0.pdfPage == pageNumber }
+        return String(normalized.prefix(maxPreviewLength)) + "…"
     }
 }
 

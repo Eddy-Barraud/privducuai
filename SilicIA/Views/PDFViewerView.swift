@@ -12,7 +12,6 @@ struct PDFViewerView: View {
     @ObservedObject var pdfChatService: PDFChatService
     @Binding var sharedPDFs: [URL]
     @State private var currentPage = 1
-    @StateObject private var highlightManager = PDFHighlightManager()
 
     var body: some View {
         HStack(spacing: 0) {
@@ -34,7 +33,7 @@ struct PDFViewerView: View {
                 pdfChatService: pdfChatService,
                 sharedPDFs: $sharedPDFs,
                 onCitationTapped: { chunk in
-                    highlightManager.highlightChunk(chunk)
+                    pdfChatService.setHighlightedChunks([chunk])
                     // Navigate to the page if it's a PDF chunk
                     if let page = chunk.pdfPage {
                         currentPage = page
