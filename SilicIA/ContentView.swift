@@ -48,15 +48,16 @@ struct ContentView: View {
                         onOfflineQuery: { query in
                             selectedTab = .chat
                             Task {
+                                let settings = AppSettings.load()
                                 await chatService.sendMessage(
                                     query,
                                     contextInput: "",
                                     pdfURLs: [],
                                     includeWebSearch: false,
-                                    language: AppSettings.load().language,
+                                    language: settings.language,
                                     temperature: 0.7,
-                                    maxResponseTokens: AppSettings.load().maxResponseTokens,
-                                    maxContextTokens: AppSettings.load().maxContextTokens
+                                    maxResponseTokens: settings.maxResponseTokens,
+                                    maxContextTokens: settings.maxContextTokens
                                 )
                             }
                         }
