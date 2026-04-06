@@ -14,6 +14,7 @@ struct ContentView: View {
     private enum AppTab: String, CaseIterable, Identifiable {
         case searchAssist = "Search Assist"
         case chat = "Chat"
+        case pdf = "PDF"
 
         var id: String { rawValue }
     }
@@ -24,6 +25,7 @@ struct ContentView: View {
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
+    @StateObject private var pdfChatService = PDFChatService()
 
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
@@ -31,6 +33,7 @@ struct ContentView: View {
             Picker("Application", selection: $selectedTab) {
                 Text(AppTab.searchAssist.rawValue).tag(AppTab.searchAssist)
                 Text(AppTab.chat.rawValue).tag(AppTab.chat)
+                Text(AppTab.pdf.rawValue).tag(AppTab.pdf)
             }
             .pickerStyle(.segmented)
             .padding([.horizontal, .top])
@@ -67,6 +70,11 @@ struct ContentView: View {
                     )
                 case .chat:
                     ChatView(sharedURLs: $sharedURLs, sharedPDFs: $sharedPDFs, chatService: chatService)
+                case .pdf:
+                    PDFViewerView(pdfChatService: pdfChatService, sharedPDFs: $sharedPDFs)
+                        .onAppear {
+                            pdfChatService.modelContext = modelContext
+                        }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -78,7 +86,13 @@ struct ContentView: View {
         }
         .onChange(of: sharedPDFs) {
             if !sharedPDFs.isEmpty {
-                selectedTab = .chat
+                selectedTab = .pdf
+                if let pdfURL = sharedPDFs.first {
+                    Task {
+                        await pdfChatService.loadPDF(pdfURL)
+                        sharedPDFs.removeAll()
+                    }
+                }
             }
         }
         .onChange(of: pendingSearchQuery) {

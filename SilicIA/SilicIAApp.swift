@@ -51,7 +51,7 @@ struct SilicIAApp: App {
         #if os(macOS)
             .defaultSize(width: 1284, height: 1662)
         #endif
-        .modelContainer(for: [Conversation.self, Message.self])
+        .modelContainer(for: [Conversation.self, PDFConversation.self, Message.self])
     }
 
     /// Routes incoming shared URLs and files to chat context.

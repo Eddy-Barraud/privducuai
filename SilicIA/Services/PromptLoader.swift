@@ -44,7 +44,7 @@ struct PromptLoader {
         return nil
     }
 
-    private static func loadPrompt(named name: String) -> String? {
+    static func loadPrompt(named name: String) -> String? {
         let candidateURLs: [URL?] = [
             Bundle.main.url(forResource: name, withExtension: "txt", subdirectory: "prompts"),
             Bundle.main.url(forResource: name, withExtension: "txt")

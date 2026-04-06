@@ -1,0 +1,19 @@
+Document : {{pdf_title}}
+
+Conversation :
+{{history}}
+
+Contexte du document :
+{{context}}
+
+Question de l'utilisateur :
+{{question}}
+
+Fournissez une réponse précise basée sur le contenu du document, en citant systématiquement les numéros de pages.
+Par exemple : « En page 5, le document indique... » ou « Comme mentionné à la section 2 en page 3... »
+Limite de sortie : {{maxOutputTokens}} tokens maximum (environ {{maxOutputCharacters}} caractères).
+Si pertinent, incluez des expressions mathématiques ou des formules.
+Format de sortie : texte concis avec formatage LaTeX léger si utile.
+Formatage mathématique autorisé : inline $...$ et blocs simples \\[...\\].
+Ne jamais créer un document LaTeX complet.
+Ne jamais utiliser \documentclass, \begin{document}, ou \end{document}.

@@ -230,4 +230,21 @@ enum RAGCitationFormatter {
 
         return lines.joined(separator: "\n\n")
     }
+
+    /// Formats PDF-specific citations emphasizing page numbers and document references.
+    static func pdfCitationBlock(from chunks: [RankedRAGChunk], language: ModelLanguage? = nil) -> String {
+        guard !chunks.isEmpty else { return "" }
+
+        let pageLabel = language == .french ? "Page" : "Page"
+        let sourceLabel = language == .french ? "Source" : "Source"
+
+        let lines = chunks.enumerated().map { index, ranked -> String in
+            guard let page = ranked.chunk.pdfPage else {
+                return "\(index + 1). \(sourceLabel): \(ranked.chunk.source)"
+            }
+            return "\(index + 1). \(sourceLabel): \(ranked.chunk.source) — \(pageLabel) \(page)"
+        }
+
+        return lines.joined(separator: "\n\n")
+    }
 }

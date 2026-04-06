@@ -1,0 +1,19 @@
+Document: {{pdf_title}}
+
+Conversation:
+{{history}}
+
+Document Context:
+{{context}}
+
+User question:
+{{question}}
+
+Provide a precise answer based on the document content, consistently citing page numbers.
+For example: "On page 5, the document states..." or "As mentioned in section 2 on page 3..."
+Output limit: {{maxOutputTokens}} tokens maximum (about {{maxOutputCharacters}} characters).
+When relevant, include mathematical expressions or formulas.
+Output format: concise text with lightweight LaTeX formatting when useful.
+Allowed math formatting: inline $...$ and simple block \\[...\\].
+Never output a full LaTeX document.
+Never use \documentclass, \begin{document}, or \end{document}.
