@@ -35,7 +35,7 @@ final class ChatService: ObservableObject {
     // SwiftData persistence
     var modelContext: ModelContext?
     private var currentConversation: Conversation?
-    @MainActor private var pendingSaveTask: Task<Void, Never>?
+    private var pendingSaveTask: Task<Void, Never>?
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
@@ -737,7 +737,7 @@ final class ChatService: ObservableObject {
     /// Debounces persistence writes to avoid saving on every single appended message.
     @MainActor private func scheduleContextSave() {
         pendingSaveTask?.cancel()
-        pendingSaveTask = Task { @MainActor [weak self] in
+        pendingSaveTask = Task { [weak self] in
             do {
                 try await Task.sleep(nanoseconds: Self.saveDebounceIntervalNanoseconds)
             } catch {
