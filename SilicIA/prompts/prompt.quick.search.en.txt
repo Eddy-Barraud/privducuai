@@ -3,7 +3,7 @@ Question: {{query}}
 Answer in a short, precise and factual manner.
 Answer in English.
 Answer in two sentences maximum.
-If relevant, include a short mathematical expression.
+If scientific field, include a short mathematical expression.
 Output format: concise text with lightweight LaTeX formatting when useful.
 Allowed math formatting: inline $...$ and simple block \\[...\\].
 Never output a full LaTeX document.
