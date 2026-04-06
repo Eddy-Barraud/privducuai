@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 /// Root container that switches between Search Assist and Chat experiences.
 struct ContentView: View {
@@ -18,6 +19,7 @@ struct ContentView: View {
     }
 
     @State private var selectedTab: AppTab = .searchAssist
+    @Environment(\.modelContext) private var modelContext
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
@@ -47,6 +49,7 @@ struct ContentView: View {
                         chatService: chatService,
                         onOfflineQuery: { query in
                             selectedTab = .chat
+                            chatService.modelContext = modelContext
                             Task {
                                 let settings = AppSettings.load()
                                 await chatService.sendMessage(
