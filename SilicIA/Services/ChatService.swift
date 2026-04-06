@@ -50,6 +50,7 @@ final class ChatService: ObservableObject {
     private static let maxWebSearchQueryLength = 500
     // Keep recent turns only, to leave room for retrieved context.
     private static let historyMessageLimit = 6
+    private static let saveDebounceNanoseconds: UInt64 = 250_000_000
     private var preAnalyzedContextKey: String?
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
@@ -738,11 +739,22 @@ final class ChatService: ObservableObject {
         pendingSaveTask?.cancel()
         pendingSaveTask = Task { @MainActor [weak self] in
             do {
-                try await Task.sleep(nanoseconds: 250_000_000)
+                try await Task.sleep(nanoseconds: Self.saveDebounceNanoseconds)
             } catch {
                 return
             }
-            guard let self, let modelContext = self.modelContext else { return }
+            guard let self else {
+                #if DEBUG
+                print("[ChatService][Persistence] Skipped save: ChatService deallocated before debounced save.")
+                #endif
+                return
+            }
+            guard let modelContext = self.modelContext else {
+                #if DEBUG
+                print("[ChatService][Persistence] Skipped save: modelContext unavailable.")
+                #endif
+                return
+            }
             _ = self.saveContext(modelContext)
         }
     }
