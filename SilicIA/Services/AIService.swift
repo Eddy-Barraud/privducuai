@@ -39,8 +39,8 @@ class AIService: ObservableObject {
     private var firstGuessSession: LanguageModelSession
     private var firstGuessSessionLanguage: ModelLanguage
 
-    private static let webChunkMaxTokens = 240
-    private static let webChunkOverlapTokens = 40
+    private static let webChunkMaxTokens = 320
+    private static let webChunkOverlapTokens = 32
     private static let fastSummaryContextUtilizationFactor = 0.50
     private static let deepSummaryContextUtilizationFactor = 0.65
 
@@ -168,6 +168,7 @@ class AIService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: query,
+            language: language,
             maxOutputTokens: effectiveMaxTokens,
             contextUtilizationFactor: contextUtilizationFactor
         )

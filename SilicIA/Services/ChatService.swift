@@ -39,10 +39,10 @@ final class ChatService: ObservableObject {
 
     // Keep web retrieval bounded to control latency and context size.
     private static let maxWebContextURLs = 8
-    // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
-    private static let webChunkMaxTokens = 240
-    private static let webChunkOverlapTokens = 40
-    private static let pdfChunkMaxTokens = 220
+    // Aggressive chunking: fewer, larger chunks to cut ranking-time model calls.
+    private static let webChunkMaxTokens = 320
+    private static let webChunkOverlapTokens = 32
+    private static let pdfChunkMaxTokens = 300
     private static let pdfChunkOverlapTokens = 30
     private static let minWebScrapingCharacters = 1500
     private static let maxWebScrapingCharacters = 12000
@@ -104,6 +104,7 @@ final class ChatService: ObservableObject {
         let selected = await ragContextService.selectContext(
             chunks: chunks,
             query: message,
+            language: language,
             maxOutputTokens: effectiveMaxOutputTokens,
             contextUtilizationFactor: RAGSelectionOptions.default.contextUtilizationFactor
         )
