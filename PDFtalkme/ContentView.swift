@@ -507,7 +507,7 @@ struct ContentView: View {
                                     .resizable()
                                     .interpolation(.high)
                                     .scaledToFit()
-                                    .frame(height: 84)
+                                    .frame(height: 150)
                                     .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
 
                                 Text("\(settings.language == .french ? "Page" : "Page") \(preview.page)")

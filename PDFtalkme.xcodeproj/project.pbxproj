@@ -273,11 +273,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = PDFtalkme;
-				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Owner;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				"INFOPLIST_KEY_NSServices[sdk=macosx*]" = "[(\n    {\n        NSMenuItem =         {\n            default = \"Ask PDF\";\n        };\n        NSMessage = askPDF;\n        NSPortName = PDFtalkme;\n        NSSendFileTypes = (\n            \"com.adobe.pdf\",\n        );\n        NSSendTypes = (\n            \"public.file-url\",\n        );\n    },\n)]";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "PDFtalkme-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
@@ -317,11 +314,8 @@
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = PDFtalkme;
-				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Owner;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
-				"INFOPLIST_KEY_NSServices[sdk=macosx*]" = "[(\n    {\n        NSMenuItem =         {\n            default = \"Ask PDF\";\n        };\n        NSMessage = askPDF;\n        NSPortName = PDFtalkme;\n        NSSendFileTypes = (\n            \"com.adobe.pdf\",\n        );\n        NSSendTypes = (\n            \"public.file-url\",\n        );\n    },\n)]";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "PDFtalkme-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 26.2;

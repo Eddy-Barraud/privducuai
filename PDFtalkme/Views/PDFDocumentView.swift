@@ -55,7 +55,7 @@ struct PDFDocumentView: NSViewRepresentable {
 
             guard let pdfURL else {
                 pdfView.document = nil
-                onSelectionChanged("")
+                context.coordinator.publishSelectionChanged("")
                 return
             }
 
@@ -67,7 +67,7 @@ struct PDFDocumentView: NSViewRepresentable {
 
             pdfView.document = loadedDocument
             pdfView.goToFirstPage(nil)
-            onSelectionChanged("")
+            context.coordinator.publishSelectionChanged("")
             context.coordinator.lastFocusRequestID = nil
             context.coordinator.lastFindRequestID = nil
             context.coordinator.lastSidebarRefreshRequestID = nil
@@ -141,7 +141,7 @@ struct PDFDocumentView: NSViewRepresentable {
                     return
                 }
                 let text = pdfView.currentSelection?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                self.onSelectionChanged(text)
+                self.publishSelectionChanged(text)
             }
         }
 
@@ -181,7 +181,7 @@ struct PDFDocumentView: NSViewRepresentable {
                 pdfView.go(to: pageSelection)
                 let workItem = DispatchWorkItem { [weak pdfView] in
                     pdfView?.clearSelection()
-                    self.onSelectionChanged("")
+                    self.publishSelectionChanged("")
                     self.isProgrammaticSelection = false
                 }
                 highlightWorkItem = workItem
@@ -259,11 +259,21 @@ struct PDFDocumentView: NSViewRepresentable {
         }
 
         func publishSidebarData(outline: [PDFOutlineItem], previews: [PDFPagePreview], pageCount: Int) {
-            onSidebarDataUpdated(outline, previews, pageCount)
+            DispatchQueue.main.async {
+                self.onSidebarDataUpdated(outline, previews, pageCount)
+            }
         }
 
         func publishFindStatus(count: Int, current: Int?) {
-            onFindStatusUpdated(count, current)
+            DispatchQueue.main.async {
+                self.onFindStatusUpdated(count, current)
+            }
+        }
+
+        func publishSelectionChanged(_ text: String) {
+            DispatchQueue.main.async {
+                self.onSelectionChanged(text)
+            }
         }
 
         private func extractOutlineItems(from document: PDFDocument) -> [PDFOutlineItem] {
