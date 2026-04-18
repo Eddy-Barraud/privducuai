@@ -1,0 +1,11 @@
+Question: {{query}}
+
+Web context:
+{{context}}
+
+Respond with:
+1. A direct answer.
+2. {{keyPointsRange}} key points.
+Limit: {{maxOutputTokens}} tokens maximum.
+When relevant, include mathematical formulas.
+Output format required : LaTeX.

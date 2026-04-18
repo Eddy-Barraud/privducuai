@@ -1,0 +1,16 @@
+Conversation:
+{{history}}
+
+Retrieved Context:
+{{context}}
+
+User question:
+{{question}}
+
+Answer in a concise and practical way.
+Output limit: {{maxOutputTokens}} tokens maximum (about {{maxOutputCharacters}} characters).
+When relevant, include mathematical expressions or formulas.
+Output format: concise text with lightweight LaTeX formatting when useful.
+Allowed math formatting: inline $...$ and simple block \\[...\\].
+Never output a full LaTeX document.
+Never use \documentclass, \begin{document}, or \end{document}.
