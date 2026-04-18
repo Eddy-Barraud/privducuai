@@ -12,11 +12,17 @@ import AppKit
 struct PDFDocumentView: NSViewRepresentable {
     let pdfURL: URL?
     let focusedCitationRequest: PDFCitationFocusRequest?
+    let findRequest: PDFFindRequest?
     let onSelectionChanged: (String) -> Void
     let onDropPDFURLs: ([URL]) -> Void
+    let onSidebarDataUpdated: ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onSelectionChanged: onSelectionChanged, onDropPDFURLs: onDropPDFURLs)
+        Coordinator(
+            onSelectionChanged: onSelectionChanged,
+            onDropPDFURLs: onDropPDFURLs,
+            onSidebarDataUpdated: onSidebarDataUpdated
+        )
     }
 
     func makeNSView(context: Context) -> PDFDropContainerView {
@@ -51,35 +57,56 @@ struct PDFDocumentView: NSViewRepresentable {
             }
 
             let accessed = pdfURL.startAccessingSecurityScopedResource()
-            let document = PDFDocument(url: pdfURL)
+            let loadedDocument = PDFDocument(url: pdfURL)
             if accessed {
                 pdfURL.stopAccessingSecurityScopedResource()
             }
 
-            pdfView.document = document
+            pdfView.document = loadedDocument
             pdfView.goToFirstPage(nil)
             onSelectionChanged("")
             context.coordinator.lastFocusRequestID = nil
+            context.coordinator.lastFindRequestID = nil
+            context.coordinator.findResults = []
+            context.coordinator.findIndex = -1
+            if let loadedDocument {
+                context.coordinator.refreshSidebarData(from: loadedDocument)
+            }
         }
 
         if context.coordinator.lastFocusRequestID != focusedCitationRequest?.requestID {
             context.coordinator.lastFocusRequestID = focusedCitationRequest?.requestID
             context.coordinator.focus(on: focusedCitationRequest?.citation, in: pdfView)
         }
+
+        if context.coordinator.lastFindRequestID != findRequest?.requestID {
+            context.coordinator.lastFindRequestID = findRequest?.requestID
+            context.coordinator.runFind(findRequest, in: pdfView)
+        }
     }
 
     final class Coordinator {
         private let onSelectionChanged: (String) -> Void
         private let onDropPDFURLs: ([URL]) -> Void
+        private let onSidebarDataUpdated: ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
         private var observerToken: NSObjectProtocol?
         private var highlightWorkItem: DispatchWorkItem?
 
         var lastLoadedURL: URL?
         var lastFocusRequestID: UUID?
+        var lastFindRequestID: UUID?
+        var lastFindQuery: String = ""
+        var findResults: [PDFSelection] = []
+        var findIndex: Int = -1
 
-        init(onSelectionChanged: @escaping (String) -> Void, onDropPDFURLs: @escaping ([URL]) -> Void) {
+        init(
+            onSelectionChanged: @escaping (String) -> Void,
+            onDropPDFURLs: @escaping ([URL]) -> Void,
+            onSidebarDataUpdated: @escaping ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
+        ) {
             self.onSelectionChanged = onSelectionChanged
             self.onDropPDFURLs = onDropPDFURLs
+            self.onSidebarDataUpdated = onSidebarDataUpdated
         }
 
         func startObserving(pdfView: PDFView) {
@@ -133,6 +160,103 @@ struct PDFDocumentView: NSViewRepresentable {
                 highlightWorkItem = workItem
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: workItem)
             }
+        }
+
+        func runFind(_ request: PDFFindRequest?, in pdfView: PDFView) {
+            guard let request else {
+                findResults = []
+                findIndex = -1
+                lastFindQuery = ""
+                pdfView.clearSelection()
+                return
+            }
+
+            guard let document = pdfView.document else {
+                return
+            }
+
+            let query = request.query.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                findResults = []
+                findIndex = -1
+                lastFindQuery = ""
+                pdfView.clearSelection()
+                return
+            }
+
+            if findResults.isEmpty || lastFindQuery.caseInsensitiveCompare(query) != .orderedSame {
+                findResults = document.findString(query, withOptions: NSString.CompareOptions.caseInsensitive)
+                lastFindQuery = query
+                findIndex = request.direction == .next ? 0 : max(findResults.count - 1, 0)
+            } else if request.direction == .next {
+                let next = findIndex + 1
+                findIndex = next >= findResults.count ? 0 : next
+            } else {
+                let previous = findIndex - 1
+                findIndex = previous < 0 ? max(findResults.count - 1, 0) : previous
+            }
+
+            guard findResults.indices.contains(findIndex) else {
+                pdfView.clearSelection()
+                return
+            }
+
+            let selection = findResults[findIndex]
+            pdfView.setCurrentSelection(selection, animate: true)
+            pdfView.go(to: selection)
+        }
+
+        func refreshSidebarData(from document: PDFDocument) {
+            let outline = extractOutlineItems(from: document)
+            let previews = extractPagePreviews(from: document)
+            onSidebarDataUpdated(outline, previews, document.pageCount)
+        }
+
+        private func extractOutlineItems(from document: PDFDocument) -> [PDFOutlineItem] {
+            guard let root = document.outlineRoot else { return [] }
+            var items: [PDFOutlineItem] = []
+
+            func walk(node: PDFOutline, level: Int) {
+                for index in 0..<node.numberOfChildren {
+                    guard let child = node.child(at: index) else { continue }
+
+                    let title = child.label?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    let page: Int?
+                    if let destinationPage = child.destination?.page {
+                        page = document.index(for: destinationPage) + 1
+                    } else if let gotoAction = child.action as? PDFActionGoTo {
+                        if let destinationPage = gotoAction.destination.page {
+                            page = document.index(for: destinationPage) + 1
+                        } else {
+                            page = nil
+                        }
+                    } else {
+                        page = nil
+                    }
+
+                    if !title.isEmpty, let page {
+                        items.append(PDFOutlineItem(title: title, page: page, level: level))
+                    }
+
+                    walk(node: child, level: level + 1)
+                }
+            }
+
+            walk(node: root, level: 0)
+            return items
+        }
+
+        private func extractPagePreviews(from document: PDFDocument) -> [PDFPagePreview] {
+            var previews: [PDFPagePreview] = []
+            previews.reserveCapacity(document.pageCount)
+
+            for pageIndex in 0..<document.pageCount {
+                guard let page = document.page(at: pageIndex) else { continue }
+                let thumb = page.thumbnail(of: CGSize(width: 120, height: 160), for: .mediaBox)
+                previews.append(PDFPagePreview(page: pageIndex + 1, thumbnail: thumb))
+            }
+
+            return previews
         }
 
         deinit {

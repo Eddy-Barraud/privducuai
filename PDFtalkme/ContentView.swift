@@ -8,6 +8,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import LaTeXSwiftUI
+import PDFKit
+import AppKit
 
 struct ContentView: View {
     @StateObject private var chatService = PDFChatService()
@@ -18,9 +20,18 @@ struct ContentView: View {
     @State private var selectedSelectionText = ""
     @State private var prioritizedSelectionText: String?
     @State private var focusedCitationRequest: PDFCitationFocusRequest?
+    @State private var findRequest: PDFFindRequest?
+    @State private var findQuery = ""
+    @State private var showFindBar = false
+    @State private var showPDFSidebar = true
+    @State private var sidebarMode: PDFSidebarMode = .outline
+    @State private var outlineItems: [PDFOutlineItem] = []
+    @State private var pagePreviews: [PDFPagePreview] = []
+    @State private var pageCount = 0
     @State private var showImporter = false
     @State private var composerInput = ""
     @FocusState private var isComposerFocused: Bool
+    @FocusState private var isFindFieldFocused: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private var selectedPDFURL: URL? {
@@ -54,6 +65,12 @@ struct ContentView: View {
         .onChange(of: openRouter.signal) {
             consumePendingOpenRequests()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .pdfTalkmeOpenFind)) { _ in
+            showFindBar = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                isFindFieldFocused = true
+            }
+        }
         .task {
             consumePendingOpenRequests()
         }
@@ -82,10 +99,24 @@ struct ContentView: View {
                         Label("Open PDF", systemImage: "doc.badge.plus")
                     }
                     .buttonStyle(.borderedProminent)
+
+                    Button {
+                        showPDFSidebar.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(settings.language == .french ? "Afficher la barre laterale" : "Toggle sidebar")
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
                 .padding(.bottom, 10)
+
+                if showFindBar {
+                    findBar
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                }
 
                 if !documents.isEmpty {
                     tabStrip
@@ -95,23 +126,38 @@ struct ContentView: View {
 
                 Divider()
 
-                PDFDocumentView(
-                    pdfURL: selectedPDFURL,
-                    focusedCitationRequest: focusedCitationRequest,
-                    onSelectionChanged: { text in
-                        selectedSelectionText = text
-                    },
-                    onDropPDFURLs: { urls in
-                        addDroppedPDFs(urls)
+                HStack(spacing: 0) {
+                    if showPDFSidebar {
+                        documentSidebar
+                            .frame(width: 220)
+
+                        Divider()
                     }
-                )
-                .overlay {
-                    if selectedPDFURL == nil {
-                        ContentUnavailableView(
-                            "Open or drop a PDF",
-                            systemImage: "doc.richtext",
-                            description: Text("Use Open PDF or drag and drop a PDF here.")
-                        )
+
+                    PDFDocumentView(
+                        pdfURL: selectedPDFURL,
+                        focusedCitationRequest: focusedCitationRequest,
+                        findRequest: findRequest,
+                        onSelectionChanged: { text in
+                            selectedSelectionText = text
+                        },
+                        onDropPDFURLs: { urls in
+                            addDroppedPDFs(urls)
+                        },
+                        onSidebarDataUpdated: { outline, previews, count in
+                            outlineItems = outline
+                            pagePreviews = previews
+                            pageCount = count
+                        }
+                    )
+                    .overlay {
+                        if selectedPDFURL == nil {
+                            ContentUnavailableView(
+                                "Open or drop a PDF",
+                                systemImage: "doc.richtext",
+                                description: Text("Use Open PDF or drag and drop a PDF here.")
+                            )
+                        }
                     }
                 }
             }
@@ -296,6 +342,164 @@ struct ContentView: View {
                 .foregroundColor(colorScheme == .dark ? .white : .black)
         } else {
             Text(message.content)
+        }
+    }
+
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundColor(.secondary)
+
+            TextField(
+                settings.language == .french ? "Rechercher dans le PDF" : "Search in PDF",
+                text: $findQuery
+            )
+            .textFieldStyle(.roundedBorder)
+            .focused($isFindFieldFocused)
+            .onSubmit {
+                runFind(next: true)
+            }
+
+            Button {
+                runFind(next: false)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .buttonStyle(.bordered)
+            .disabled(findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Button {
+                runFind(next: true)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .buttonStyle(.bordered)
+            .disabled(findQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+            Button {
+                showFindBar = false
+                findQuery = ""
+                findRequest = nil
+                isFindFieldFocused = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+        }
+        .padding(8)
+        .background(Color(nsColor: .controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
+    private var documentSidebar: some View {
+        VStack(spacing: 0) {
+            Picker("Sidebar", selection: $sidebarMode) {
+                Text(settings.language == .french ? "Plan" : "Outline").tag(PDFSidebarMode.outline)
+                Text(settings.language == .french ? "Pages" : "Pages").tag(PDFSidebarMode.pages)
+            }
+            .pickerStyle(.segmented)
+            .padding(8)
+
+            Divider()
+
+            if sidebarMode == .outline {
+                outlineList
+            } else {
+                pagePreviewList
+            }
+        }
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    private var outlineList: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 4) {
+                if outlineItems.isEmpty {
+                    Text(settings.language == .french ? "Aucun plan" : "No outline")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(outlineItems) { item in
+                        Button {
+                            focusedCitationRequest = PDFCitationFocusRequest(
+                                citation: PDFCitation(
+                                    rank: item.page,
+                                    source: "outline",
+                                    page: item.page,
+                                    snippet: nil,
+                                    isPriority: false
+                                )
+                            )
+                        } label: {
+                            HStack(spacing: 8) {
+                                Text(item.title)
+                                    .lineLimit(1)
+                                Spacer(minLength: 8)
+                                Text("\(item.page)")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 6)
+                            .padding(.leading, CGFloat(item.level) * 10)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(8)
+        }
+    }
+
+    private var pagePreviewList: some View {
+        ScrollView {
+            LazyVStack(spacing: 8) {
+                if pagePreviews.isEmpty {
+                    Text(settings.language == .french ? "Aucune page" : "No pages")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ForEach(pagePreviews) { preview in
+                        Button {
+                            focusedCitationRequest = PDFCitationFocusRequest(
+                                citation: PDFCitation(
+                                    rank: preview.page,
+                                    source: "page-preview",
+                                    page: preview.page,
+                                    snippet: nil,
+                                    isPriority: false
+                                )
+                            )
+                        } label: {
+                            VStack(spacing: 6) {
+                                Image(nsImage: preview.thumbnail)
+                                    .resizable()
+                                    .interpolation(.high)
+                                    .scaledToFit()
+                                    .frame(height: 84)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+
+                                Text("\(settings.language == .french ? "Page" : "Page") \(preview.page)")
+                                    .font(.caption)
+                                    .foregroundColor(.primary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color(nsColor: .textBackgroundColor))
+                            )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(8)
         }
     }
 
@@ -525,6 +729,11 @@ struct ContentView: View {
     private func activateSelectedTab() {
         selectedSelectionText = ""
         prioritizedSelectionText = nil
+        focusedCitationRequest = nil
+        findRequest = nil
+        outlineItems = []
+        pagePreviews = []
+        pageCount = 0
         chatService.activateDocument(selectedPDFURL)
     }
 
@@ -533,6 +742,16 @@ struct ContentView: View {
         guard !incoming.isEmpty else { return }
         addPDFTabs(incoming)
     }
+
+    private func runFind(next: Bool) {
+        let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return }
+        findRequest = PDFFindRequest(
+            query: query,
+            direction: next ? .next : .previous
+        )
+    }
+
 }
 
 private struct PDFDocumentTab: Identifiable, Equatable {
@@ -550,6 +769,45 @@ private struct PDFDocumentTab: Identifiable, Equatable {
             options: .regularExpression
         )
     }
+}
+
+enum PDFSidebarMode {
+    case outline
+    case pages
+}
+
+struct PDFOutlineItem: Identifiable {
+    let id = UUID()
+    let title: String
+    let page: Int
+    let level: Int
+}
+
+struct PDFPagePreview: Identifiable {
+    let id = UUID()
+    let page: Int
+    let thumbnail: NSImage
+}
+
+enum PDFFindDirection {
+    case previous
+    case next
+}
+
+struct PDFFindRequest: Equatable {
+    let query: String
+    let direction: PDFFindDirection
+    let requestID: UUID
+
+    init(query: String, direction: PDFFindDirection, requestID: UUID = UUID()) {
+        self.query = query
+        self.direction = direction
+        self.requestID = requestID
+    }
+}
+
+extension Notification.Name {
+    static let pdfTalkmeOpenFind = Notification.Name("PDFtalkme.OpenFind")
 }
 
 #Preview {

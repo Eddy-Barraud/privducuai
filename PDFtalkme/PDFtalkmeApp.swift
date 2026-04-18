@@ -35,6 +35,17 @@ struct PDFtalkmeApp: App {
 #endif
         }
         .defaultSize(width: 1460, height: 940)
+
+        #if os(macOS)
+        .commands {
+            CommandMenu("Find") {
+                Button("Find in PDF") {
+                    NotificationCenter.default.post(name: .pdfTalkmeOpenFind, object: nil)
+                }
+                .keyboardShortcut("f", modifiers: .command)
+            }
+        }
+        #endif
     }
 
     private func handleIncomingURL(_ url: URL) {
