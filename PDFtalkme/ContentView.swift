@@ -23,11 +23,14 @@ struct ContentView: View {
     @State private var findRequest: PDFFindRequest?
     @State private var findQuery = ""
     @State private var showFindBar = false
+    @State private var findMatchCount = 0
+    @State private var findMatchIndex = 0
     @State private var showPDFSidebar = true
     @State private var sidebarMode: PDFSidebarMode = .outline
     @State private var outlineItems: [PDFOutlineItem] = []
     @State private var pagePreviews: [PDFPagePreview] = []
     @State private var pageCount = 0
+    @State private var sidebarRefreshRequestID = UUID()
     @State private var showImporter = false
     @State private var composerInput = ""
     @FocusState private var isComposerFocused: Bool
@@ -101,6 +104,17 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
 
                     Button {
+                        showFindBar = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isFindFieldFocused = true
+                        }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .buttonStyle(.bordered)
+                    .help(settings.language == .french ? "Rechercher" : "Search")
+
+                    Button {
                         showPDFSidebar.toggle()
                     } label: {
                         Image(systemName: "sidebar.left")
@@ -137,6 +151,7 @@ struct ContentView: View {
                     PDFDocumentView(
                         pdfURL: selectedPDFURL,
                         focusedCitationRequest: focusedCitationRequest,
+                        sidebarRefreshRequestID: sidebarRefreshRequestID,
                         findRequest: findRequest,
                         onSelectionChanged: { text in
                             selectedSelectionText = text
@@ -148,6 +163,10 @@ struct ContentView: View {
                             outlineItems = outline
                             pagePreviews = previews
                             pageCount = count
+                        },
+                        onFindStatusUpdated: { count, current in
+                            findMatchCount = count
+                            findMatchIndex = current ?? 0
                         }
                     )
                     .overlay {
@@ -164,7 +183,7 @@ struct ContentView: View {
 
             if shouldShowSelectionPopup {
                 selectionPopup
-                    .padding(.top, 18)
+                    .padding(.top, selectionPopupTopPadding)
                     .padding(.trailing, 18)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -380,12 +399,19 @@ struct ContentView: View {
                 showFindBar = false
                 findQuery = ""
                 findRequest = nil
+                findMatchCount = 0
+                findMatchIndex = 0
                 isFindFieldFocused = false
             } label: {
                 Image(systemName: "xmark.circle.fill")
             }
             .buttonStyle(.plain)
             .foregroundColor(.secondary)
+
+            Text(findStatusLabel)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(minWidth: 60, alignment: .trailing)
         }
         .padding(8)
         .background(Color(nsColor: .controlBackgroundColor))
@@ -627,6 +653,24 @@ struct ContentView: View {
         !selectedSelectionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var selectionPopupTopPadding: CGFloat {
+        var offset: CGFloat = 66
+        if showFindBar {
+            offset += 46
+        }
+        if !documents.isEmpty {
+            offset += 38
+        }
+        return offset
+    }
+
+    private var findStatusLabel: String {
+        if findMatchCount == 0 {
+            return settings.language == .french ? "0 resultat" : "0 matches"
+        }
+        return "\(findMatchIndex)/\(findMatchCount)"
+    }
+
     private func selectionPreview(_ text: String) -> String {
         let compact = text.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -731,9 +775,12 @@ struct ContentView: View {
         prioritizedSelectionText = nil
         focusedCitationRequest = nil
         findRequest = nil
+        findMatchCount = 0
+        findMatchIndex = 0
         outlineItems = []
         pagePreviews = []
         pageCount = 0
+        sidebarRefreshRequestID = UUID()
         chatService.activateDocument(selectedPDFURL)
     }
 
@@ -746,6 +793,7 @@ struct ContentView: View {
     private func runFind(next: Bool) {
         let query = findQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return }
+        selectedSelectionText = ""
         findRequest = PDFFindRequest(
             query: query,
             direction: next ? .next : .previous

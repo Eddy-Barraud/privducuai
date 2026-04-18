@@ -12,16 +12,19 @@ import AppKit
 struct PDFDocumentView: NSViewRepresentable {
     let pdfURL: URL?
     let focusedCitationRequest: PDFCitationFocusRequest?
+    let sidebarRefreshRequestID: UUID
     let findRequest: PDFFindRequest?
     let onSelectionChanged: (String) -> Void
     let onDropPDFURLs: ([URL]) -> Void
     let onSidebarDataUpdated: ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
+    let onFindStatusUpdated: (Int, Int?) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             onSelectionChanged: onSelectionChanged,
             onDropPDFURLs: onDropPDFURLs,
-            onSidebarDataUpdated: onSidebarDataUpdated
+            onSidebarDataUpdated: onSidebarDataUpdated,
+            onFindStatusUpdated: onFindStatusUpdated
         )
     }
 
@@ -67,10 +70,23 @@ struct PDFDocumentView: NSViewRepresentable {
             onSelectionChanged("")
             context.coordinator.lastFocusRequestID = nil
             context.coordinator.lastFindRequestID = nil
+            context.coordinator.lastSidebarRefreshRequestID = nil
             context.coordinator.findResults = []
             context.coordinator.findIndex = -1
+            context.coordinator.lastFindQuery = ""
+            context.coordinator.isProgrammaticSelection = false
+            context.coordinator.publishFindStatus(count: 0, current: nil)
             if let loadedDocument {
                 context.coordinator.refreshSidebarData(from: loadedDocument)
+            }
+        }
+
+        if context.coordinator.lastSidebarRefreshRequestID != sidebarRefreshRequestID {
+            context.coordinator.lastSidebarRefreshRequestID = sidebarRefreshRequestID
+            if let document = pdfView.document {
+                context.coordinator.refreshSidebarData(from: document)
+            } else {
+                context.coordinator.publishSidebarData(outline: [], previews: [], pageCount: 0)
             }
         }
 
@@ -89,24 +105,29 @@ struct PDFDocumentView: NSViewRepresentable {
         private let onSelectionChanged: (String) -> Void
         private let onDropPDFURLs: ([URL]) -> Void
         private let onSidebarDataUpdated: ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
+        private let onFindStatusUpdated: (Int, Int?) -> Void
         private var observerToken: NSObjectProtocol?
         private var highlightWorkItem: DispatchWorkItem?
 
         var lastLoadedURL: URL?
         var lastFocusRequestID: UUID?
         var lastFindRequestID: UUID?
+        var lastSidebarRefreshRequestID: UUID?
         var lastFindQuery: String = ""
         var findResults: [PDFSelection] = []
         var findIndex: Int = -1
+        var isProgrammaticSelection = false
 
         init(
             onSelectionChanged: @escaping (String) -> Void,
             onDropPDFURLs: @escaping ([URL]) -> Void,
-            onSidebarDataUpdated: @escaping ([PDFOutlineItem], [PDFPagePreview], Int) -> Void
+            onSidebarDataUpdated: @escaping ([PDFOutlineItem], [PDFPagePreview], Int) -> Void,
+            onFindStatusUpdated: @escaping (Int, Int?) -> Void
         ) {
             self.onSelectionChanged = onSelectionChanged
             self.onDropPDFURLs = onDropPDFURLs
             self.onSidebarDataUpdated = onSidebarDataUpdated
+            self.onFindStatusUpdated = onFindStatusUpdated
         }
 
         func startObserving(pdfView: PDFView) {
@@ -116,6 +137,9 @@ struct PDFDocumentView: NSViewRepresentable {
                 queue: .main
             ) { [weak self, weak pdfView] _ in
                 guard let self, let pdfView else { return }
+                if self.isProgrammaticSelection {
+                    return
+                }
                 let text = pdfView.currentSelection?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
                 self.onSelectionChanged(text)
             }
@@ -152,13 +176,18 @@ struct PDFDocumentView: NSViewRepresentable {
             }
 
             if let pageSelection {
+                isProgrammaticSelection = true
                 pdfView.setCurrentSelection(pageSelection, animate: true)
                 pdfView.go(to: pageSelection)
                 let workItem = DispatchWorkItem { [weak pdfView] in
                     pdfView?.clearSelection()
+                    self.onSelectionChanged("")
+                    self.isProgrammaticSelection = false
                 }
                 highlightWorkItem = workItem
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: workItem)
+            } else {
+                isProgrammaticSelection = false
             }
         }
 
@@ -167,7 +196,11 @@ struct PDFDocumentView: NSViewRepresentable {
                 findResults = []
                 findIndex = -1
                 lastFindQuery = ""
+                publishFindStatus(count: 0, current: nil)
+                pdfView.document?.cancelFindString()
+                isProgrammaticSelection = true
                 pdfView.clearSelection()
+                isProgrammaticSelection = false
                 return
             }
 
@@ -180,7 +213,11 @@ struct PDFDocumentView: NSViewRepresentable {
                 findResults = []
                 findIndex = -1
                 lastFindQuery = ""
+                publishFindStatus(count: 0, current: nil)
+                document.cancelFindString()
+                isProgrammaticSelection = true
                 pdfView.clearSelection()
+                isProgrammaticSelection = false
                 return
             }
 
@@ -197,19 +234,36 @@ struct PDFDocumentView: NSViewRepresentable {
             }
 
             guard findResults.indices.contains(findIndex) else {
+                publishFindStatus(count: findResults.count, current: nil)
+                isProgrammaticSelection = true
                 pdfView.clearSelection()
+                isProgrammaticSelection = false
                 return
             }
 
             let selection = findResults[findIndex]
+            let safeIndex = findIndex + 1
+            publishFindStatus(count: findResults.count, current: safeIndex)
+            document.cancelFindString()
+            document.beginFindString(query, withOptions: NSString.CompareOptions.caseInsensitive)
+            isProgrammaticSelection = true
             pdfView.setCurrentSelection(selection, animate: true)
             pdfView.go(to: selection)
+            isProgrammaticSelection = false
         }
 
         func refreshSidebarData(from document: PDFDocument) {
             let outline = extractOutlineItems(from: document)
             let previews = extractPagePreviews(from: document)
-            onSidebarDataUpdated(outline, previews, document.pageCount)
+            publishSidebarData(outline: outline, previews: previews, pageCount: document.pageCount)
+        }
+
+        func publishSidebarData(outline: [PDFOutlineItem], previews: [PDFPagePreview], pageCount: Int) {
+            onSidebarDataUpdated(outline, previews, pageCount)
+        }
+
+        func publishFindStatus(count: Int, current: Int?) {
+            onFindStatusUpdated(count, current)
         }
 
         private func extractOutlineItems(from document: PDFDocument) -> [PDFOutlineItem] {
