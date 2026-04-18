@@ -14,6 +14,9 @@ import AppKit
 @main
 /// Application entry point that launches the main content window.
 struct SilicIAApp: App {
+    private static let sharedAppGroupIdentifier = "group.fr.trevalim.silicia.shared"
+    private static let sharedInboxDirectoryName = "IncomingSharedFiles"
+
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
     @State private var pendingSearchQuery: String?
@@ -64,6 +67,32 @@ struct SilicIAApp: App {
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            url.scheme?.lowercased() == "silicia",
            let queryItems = components.queryItems {
+            if components.host?.lowercased() == "share" || components.path.lowercased().contains("share") {
+                let incomingURLs = queryItems
+                    .filter { $0.name == "url" }
+                    .compactMap(\.value)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                let incomingSharedPDFNames = queryItems
+                    .filter { $0.name == "sharedPDF" }
+                    .compactMap(\.value)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                if !incomingURLs.isEmpty {
+                    sharedURLs = incomingURLs
+                }
+
+                let importedSharedPDFs = importSharedPDFs(fileNames: incomingSharedPDFNames)
+                if !importedSharedPDFs.isEmpty {
+                    sharedPDFs = importedSharedPDFs
+                }
+
+                if !incomingURLs.isEmpty || !importedSharedPDFs.isEmpty {
+                    return
+                }
+            }
+
             if (components.host?.lowercased() == "search" || components.path.lowercased().contains("search")),
                queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value == nil {
                 pendingSearchQuery = ""
@@ -85,6 +114,30 @@ struct SilicIAApp: App {
         if absolute.hasPrefix("http://") || absolute.hasPrefix("https://") {
             sharedURLs = [absolute]
         }
+    }
+
+    private func importSharedPDFs(fileNames: [String]) -> [URL] {
+        guard !fileNames.isEmpty,
+              let groupContainer = FileManager.default.containerURL(
+                forSecurityApplicationGroupIdentifier: Self.sharedAppGroupIdentifier
+              ) else {
+            return []
+        }
+
+        let inboxDirectory = groupContainer.appendingPathComponent(Self.sharedInboxDirectoryName, isDirectory: true)
+        var imported: [URL] = []
+
+        for fileName in fileNames {
+            guard URL(fileURLWithPath: fileName).pathExtension.lowercased() == "pdf" else { continue }
+            let sourceURL = inboxDirectory.appendingPathComponent(fileName)
+            guard FileManager.default.fileExists(atPath: sourceURL.path) else { continue }
+            if let persistedURL = DroppedPDFStore.persist(sourceURL, preferredFileName: fileName) {
+                imported.append(persistedURL)
+                try? FileManager.default.removeItem(at: sourceURL)
+            }
+        }
+
+        return imported
     }
 }
 
