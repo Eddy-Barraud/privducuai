@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A00100142F00000100000001 /* LaTeXSwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A00100132F00000100000001 /* LaTeXSwiftUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		A00100012F00000100000001 /* PDFtalkme.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PDFtalkme.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A00100142F00000100000001 /* LaTeXSwiftUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = PDFtalkme;
 			packageProductDependencies = (
+				A00100132F00000100000001 /* LaTeXSwiftUI */,
 			);
 			productName = PDFtalkme;
 			productReference = A00100012F00000100000001 /* PDFtalkme.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = A00100042F00000100000001;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A00100122F00000100000001 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A00100052F00000100000001 /* Products */;
 			projectDirPath = "";
@@ -329,6 +338,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A00100122F00000100000001 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/colinc86/LaTeXSwiftUI";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.5.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00100132F00000100000001 /* LaTeXSwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00100122F00000100000001 /* XCRemoteSwiftPackageReference "LaTeXSwiftUI" */;
+			productName = LaTeXSwiftUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A00100092F00000100000001 /* Project object */;
 }

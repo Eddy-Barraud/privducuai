@@ -7,16 +7,29 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import LaTeXSwiftUI
 
 struct ContentView: View {
     @StateObject private var chatService = PDFChatService()
+    @StateObject private var openRouter = PDFOpenRouter.shared
     @State private var settings = AppSettings.load()
-    @State private var selectedPDFURL: URL?
+    @State private var documents: [PDFDocumentTab] = []
+    @State private var selectedTabID: UUID?
     @State private var selectedSelectionText = ""
     @State private var prioritizedSelectionText: String?
     @State private var showImporter = false
     @State private var composerInput = ""
+    @State private var isDropTargeted = false
     @FocusState private var isComposerFocused: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var selectedPDFURL: URL? {
+        guard let selectedTabID,
+              let tab = documents.first(where: { $0.id == selectedTabID }) else {
+            return nil
+        }
+        return tab.url
+    }
 
     var body: some View {
         HSplitView {
@@ -29,11 +42,20 @@ struct ContentView: View {
         .fileImporter(
             isPresented: $showImporter,
             allowedContentTypes: [.pdf],
-            allowsMultipleSelection: false,
+            allowsMultipleSelection: true,
             onCompletion: handlePDFImport
         )
         .onChange(of: settings) {
             settings.save()
+        }
+        .onChange(of: selectedTabID) {
+            activateSelectedTab()
+        }
+        .onChange(of: openRouter.signal) {
+            consumePendingOpenRequests()
+        }
+        .task {
+            consumePendingOpenRequests()
         }
     }
 
@@ -41,9 +63,16 @@ struct ContentView: View {
         ZStack(alignment: .topTrailing) {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
-                    Text(selectedPDFURL?.lastPathComponent ?? "No PDF opened")
-                        .font(.headline)
-                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        Image("PDFtalkmeLogo")
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: 19, height: 19)
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        Text("PDFtalkme")
+                            .font(.headline)
+                            .lineLimit(1)
+                    }
 
                     Spacer()
 
@@ -58,6 +87,12 @@ struct ContentView: View {
                 .padding(.top, 14)
                 .padding(.bottom, 10)
 
+                if !documents.isEmpty {
+                    tabStrip
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 8)
+                }
+
                 Divider()
 
                 PDFDocumentView(pdfURL: selectedPDFURL) { text in
@@ -66,9 +101,9 @@ struct ContentView: View {
                 .overlay {
                     if selectedPDFURL == nil {
                         ContentUnavailableView(
-                            "Open a PDF",
+                            "Open or drop a PDF",
                             systemImage: "doc.richtext",
-                            description: Text("Use the Open PDF button to start reading and chatting.")
+                            description: Text("Use Open PDF or drag and drop a PDF here.")
                         )
                     }
                 }
@@ -80,9 +115,56 @@ struct ContentView: View {
                     .padding(.trailing, 18)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 3, dash: [8]))
+                    .padding(10)
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .contentShape(Rectangle())
+        .onDrop(of: [.fileURL, .pdf], isTargeted: $isDropTargeted, perform: handlePDFDrop)
         .animation(.easeInOut(duration: 0.18), value: shouldShowSelectionPopup)
+        .animation(.easeInOut(duration: 0.12), value: isDropTargeted)
+    }
+
+    private var tabStrip: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(documents) { tab in
+                    HStack(spacing: 6) {
+                        Button {
+                            selectedTabID = tab.id
+                            selectedSelectionText = ""
+                            prioritizedSelectionText = nil
+                        } label: {
+                            Text(tab.title)
+                                .lineLimit(1)
+                        }
+                        .buttonStyle(.plain)
+
+                        Button {
+                            closeTab(id: tab.id)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        selectedTabID == tab.id
+                        ? Color.accentColor.opacity(0.18)
+                        : Color(nsColor: .controlBackgroundColor)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                }
+            }
+        }
     }
 
     private var chatPane: some View {
@@ -112,18 +194,33 @@ struct ContentView: View {
     private var chatHeader: some View {
         VStack(spacing: 12) {
             HStack {
-                Text("PDFtalkme")
-                    .font(.title3)
-                    .fontWeight(.semibold)
+                HStack(spacing: 8) {
+                    Image("PDFtalkmeLogo")
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: 20, height: 20)
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    Text("PDFtalkme")
+                        .font(.title3)
+                        .fontWeight(.semibold)
+                }
 
                 Spacer()
 
                 Button {
-                    chatService.reset()
+                    chatService.clearInMemoryConversation()
                 } label: {
                     Label("New Chat", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
+
+                Button {
+                    chatService.clearHistoryForActiveDocument()
+                } label: {
+                    Label("Clear History", systemImage: "trash")
+                }
+                .buttonStyle(.bordered)
+                .disabled(selectedPDFURL == nil)
             }
 
             HStack(spacing: 10) {
@@ -148,7 +245,7 @@ struct ContentView: View {
         ScrollView {
             LazyVStack(spacing: 10) {
                 if chatService.messages.isEmpty {
-                    Text("Ask questions about your PDF on the right sidebar. Selections marked with a star are forced as rank-1 retrieval context.")
+                    Text("Ask questions about the active PDF tab. Starred selections are forced as rank-1 retrieval context.")
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
@@ -159,7 +256,7 @@ struct ContentView: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
 
-                        Text(message.content)
+                        renderedMessageContent(message)
                             .textSelection(.enabled)
 
                         if let citations = message.citations,
@@ -204,6 +301,17 @@ struct ContentView: View {
         .background(Color(nsColor: .textBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    @ViewBuilder
+    private func renderedMessageContent(_ message: PDFChatMessage) -> some View {
+        if message.role == .assistant {
+            LaTeX(message.content)
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+        } else {
+            Text(message.content)
+        }
     }
 
     private var composer: some View {
@@ -311,13 +419,131 @@ struct ContentView: View {
     }
 
     private func handlePDFImport(_ result: Result<[URL], Error>) {
-        guard case .success(let urls) = result,
-              let first = urls.first else {
-            return
+        guard case .success(let urls) = result else { return }
+        addPDFTabs(urls)
+    }
+
+    private func handlePDFDrop(_ providers: [NSItemProvider]) -> Bool {
+        let candidates = providers.filter {
+            $0.hasItemConformingToTypeIdentifier(UTType.pdf.identifier)
+            || $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier)
         }
-        selectedPDFURL = first
+        guard !candidates.isEmpty else { return false }
+
+        for provider in candidates {
+            if provider.hasItemConformingToTypeIdentifier(UTType.pdf.identifier) {
+                provider.loadFileRepresentation(forTypeIdentifier: UTType.pdf.identifier) { url, _ in
+                    guard let url,
+                          let stableURL = copyDroppedPDFToTemporaryStorage(url) else { return }
+                    Task { @MainActor in
+                        addPDFTabs([stableURL])
+                    }
+                }
+            } else {
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    let fileURL: URL?
+                    if let data = item as? Data {
+                        fileURL = NSURL(absoluteURLWithDataRepresentation: data, relativeTo: nil) as URL?
+                    } else if let url = item as? URL {
+                        fileURL = url
+                    } else if let nsURL = item as? NSURL {
+                        fileURL = nsURL as URL
+                    } else {
+                        fileURL = nil
+                    }
+
+                    guard let fileURL,
+                          fileURL.pathExtension.lowercased() == "pdf" else {
+                        return
+                    }
+                    Task { @MainActor in
+                        addPDFTabs([fileURL])
+                    }
+                }
+            }
+        }
+        return true
+    }
+
+    private func addPDFTabs(_ urls: [URL]) {
+        for url in urls where url.pathExtension.lowercased() == "pdf" {
+            if let existing = documents.first(where: { $0.url.standardizedFileURL == url.standardizedFileURL }) {
+                selectedTabID = existing.id
+                continue
+            }
+            let tab = PDFDocumentTab(url: url)
+            documents.append(tab)
+            selectedTabID = tab.id
+        }
+
+        if selectedTabID == nil, let first = documents.first {
+            selectedTabID = first.id
+        }
+
         selectedSelectionText = ""
         prioritizedSelectionText = nil
+        activateSelectedTab()
+    }
+
+    private func copyDroppedPDFToTemporaryStorage(_ sourceURL: URL) -> URL? {
+        let fileManager = FileManager.default
+        let folder = fileManager.temporaryDirectory.appendingPathComponent("PDFtalkmeDroppedPDFs", isDirectory: true)
+
+        do {
+            try fileManager.createDirectory(at: folder, withIntermediateDirectories: true)
+            let preferredName = sourceURL.lastPathComponent.isEmpty ? "dropped.pdf" : sourceURL.lastPathComponent
+            let baseName = (preferredName as NSString).deletingPathExtension
+            let ext = (preferredName as NSString).pathExtension.isEmpty ? "pdf" : (preferredName as NSString).pathExtension
+            let destination = folder.appendingPathComponent("\(baseName)-\(UUID().uuidString).\(ext)")
+            if fileManager.fileExists(atPath: destination.path) {
+                try fileManager.removeItem(at: destination)
+            }
+            try fileManager.copyItem(at: sourceURL, to: destination)
+            return destination
+        } catch {
+            #if DEBUG
+            print("[ContentView] Failed to persist dropped PDF: \(error.localizedDescription)")
+            #endif
+            return nil
+        }
+    }
+
+    private func closeTab(id: UUID) {
+        guard let index = documents.firstIndex(where: { $0.id == id }) else { return }
+        documents.remove(at: index)
+
+        if selectedTabID == id {
+            selectedTabID = documents.indices.contains(index)
+                ? documents[index].id
+                : documents.last?.id
+            selectedSelectionText = ""
+            prioritizedSelectionText = nil
+            activateSelectedTab()
+        }
+    }
+
+    private func activateSelectedTab() {
+        selectedSelectionText = ""
+        prioritizedSelectionText = nil
+        chatService.activateDocument(selectedPDFURL)
+    }
+
+    private func consumePendingOpenRequests() {
+        let incoming = openRouter.drain()
+        guard !incoming.isEmpty else { return }
+        addPDFTabs(incoming)
+    }
+}
+
+private struct PDFDocumentTab: Identifiable, Equatable {
+    let id: UUID
+    let url: URL
+    let title: String
+
+    init(id: UUID = UUID(), url: URL) {
+        self.id = id
+        self.url = url
+        self.title = url.deletingPathExtension().lastPathComponent
     }
 }
 

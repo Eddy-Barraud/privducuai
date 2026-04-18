@@ -10,6 +10,7 @@ import FoundationModels
 import Combine
 import PDFKit
 import Vision
+import CryptoKit
 
 @MainActor
 final class PDFChatService: ObservableObject {
@@ -22,8 +23,51 @@ final class PDFChatService: ObservableObject {
 
     private static let pdfChunkMaxTokens = 220
     private static let pdfChunkOverlapTokens = 30
+    private static let persistDebounceNanoseconds: UInt64 = 220_000_000
 
-    func reset() {
+    private var activeDocumentKey: String?
+    private var activePDFURL: URL?
+    private var pendingPersistTask: Task<Void, Never>?
+
+    private lazy var conversationsDirectory: URL = {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return appSupport
+            .appendingPathComponent("PDFtalkme", isDirectory: true)
+            .appendingPathComponent("Conversations", isDirectory: true)
+    }()
+
+    func activateDocument(_ pdfURL: URL?) {
+        pendingPersistTask?.cancel()
+        errorMessage = nil
+        isResponding = false
+
+        guard let pdfURL,
+              let key = documentKey(for: pdfURL) else {
+            activeDocumentKey = nil
+            activePDFURL = nil
+            messages = []
+            return
+        }
+
+        activeDocumentKey = key
+        activePDFURL = pdfURL
+        messages = loadHistory(for: key)
+    }
+
+    func clearHistoryForActiveDocument() {
+        guard let key = activeDocumentKey else {
+            messages = []
+            return
+        }
+
+        pendingPersistTask?.cancel()
+        messages = []
+        deleteHistory(for: key)
+    }
+
+    func clearInMemoryConversation() {
+        pendingPersistTask?.cancel()
         messages = []
         isResponding = false
         errorMessage = nil
@@ -38,7 +82,13 @@ final class PDFChatService: ObservableObject {
         let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedMessage.isEmpty else { return }
 
+        if activePDFURL?.standardizedFileURL != pdfURL?.standardizedFileURL {
+            activateDocument(pdfURL)
+        }
+
         messages.append(PDFChatMessage(role: .user, content: trimmedMessage))
+        schedulePersist()
+
         isResponding = true
         errorMessage = nil
         defer { isResponding = false }
@@ -138,11 +188,110 @@ final class PDFChatService: ObservableObject {
             let content = normalizeModelOutput(String(describing: response.content))
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: settings.language)
             messages.append(PDFChatMessage(role: .assistant, content: content, citations: citations))
+            schedulePersist()
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
             messages.append(PDFChatMessage(role: .assistant, content: fallback))
             errorMessage = error.localizedDescription
+            schedulePersist()
         }
+    }
+
+    private func schedulePersist() {
+        pendingPersistTask?.cancel()
+        let snapshot = messages
+        let documentKey = activeDocumentKey
+        pendingPersistTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: Self.persistDebounceNanoseconds)
+            } catch {
+                return
+            }
+            guard let self,
+                  let documentKey else {
+                return
+            }
+            self.persist(messages: snapshot, for: documentKey)
+        }
+    }
+
+    private func persist(messages: [PDFChatMessage], for documentKey: String) {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.withoutEscapingSlashes]
+
+        let records = messages.map { message in
+            PersistedMessage(
+                role: message.role == .assistant ? "assistant" : "user",
+                content: message.content,
+                citations: message.citations,
+                timestamp: message.timestamp
+            )
+        }
+
+        do {
+            try FileManager.default.createDirectory(at: conversationsDirectory, withIntermediateDirectories: true)
+            let payload = PersistedConversation(
+                key: documentKey,
+                updatedAt: Date(),
+                messages: records
+            )
+            let data = try encoder.encode(payload)
+            try data.write(to: historyFileURL(for: documentKey), options: .atomic)
+        } catch {
+            #if DEBUG
+            print("[PDFChatService] Failed to persist conversation: \(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    private func loadHistory(for documentKey: String) -> [PDFChatMessage] {
+        let fileURL = historyFileURL(for: documentKey)
+        guard FileManager.default.fileExists(atPath: fileURL.path),
+              let data = try? Data(contentsOf: fileURL),
+              let payload = try? JSONDecoder().decode(PersistedConversation.self, from: data) else {
+            return []
+        }
+
+        return payload.messages.map { persisted in
+            PDFChatMessage(
+                role: persisted.role == "assistant" ? .assistant : .user,
+                content: persisted.content,
+                citations: persisted.citations,
+                timestamp: persisted.timestamp
+            )
+        }
+    }
+
+    private func deleteHistory(for documentKey: String) {
+        let fileURL = historyFileURL(for: documentKey)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else { return }
+        do {
+            try FileManager.default.removeItem(at: fileURL)
+        } catch {
+            #if DEBUG
+            print("[PDFChatService] Failed to delete conversation file: \(error.localizedDescription)")
+            #endif
+        }
+    }
+
+    private func historyFileURL(for documentKey: String) -> URL {
+        conversationsDirectory.appendingPathComponent("\(documentKey).json")
+    }
+
+    private func documentKey(for url: URL) -> String? {
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer {
+            if accessed {
+                url.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        guard let data = try? Data(contentsOf: url) else {
+            return nil
+        }
+
+        let digest = SHA256.hash(data: data)
+        return digest.map { String(format: "%02x", $0) }.joined()
     }
 
     private func extractPDFPageTexts(from url: URL) -> [String] {
@@ -341,6 +490,19 @@ final class PDFChatService: ObservableObject {
     }
 }
 
+private struct PersistedConversation: Codable {
+    let key: String
+    let updatedAt: Date
+    let messages: [PersistedMessage]
+}
+
+private struct PersistedMessage: Codable {
+    let role: String
+    let content: String
+    let citations: String?
+    let timestamp: Date
+}
+
 struct PDFChatMessage: Identifiable {
     enum Role {
         case user
@@ -351,10 +513,12 @@ struct PDFChatMessage: Identifiable {
     let role: Role
     let content: String
     let citations: String?
+    let timestamp: Date
 
-    init(role: Role, content: String, citations: String? = nil) {
+    init(role: Role, content: String, citations: String? = nil, timestamp: Date = Date()) {
         self.role = role
         self.content = content
         self.citations = citations
+        self.timestamp = timestamp
     }
 }
