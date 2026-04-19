@@ -23,6 +23,7 @@ struct ContentView: View {
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
+    @Binding var pendingVoiceSearchRequest: Bool
     @StateObject private var chatService = ChatService()
 
     /// Renders the tab picker and currently selected application screen.
@@ -45,6 +46,10 @@ struct ContentView: View {
                         initialQuery: pendingSearchQuery,
                         onInitialQueryHandled: {
                             pendingSearchQuery = nil
+                        },
+                        initialVoiceSearch: pendingVoiceSearchRequest,
+                        onInitialVoiceSearchHandled: {
+                            pendingVoiceSearchRequest = false
                         },
                         chatService: chatService,
                         onOfflineQuery: { query in
@@ -86,10 +91,20 @@ struct ContentView: View {
                 selectedTab = .searchAssist
             }
         }
+        .onChange(of: pendingVoiceSearchRequest) {
+            if pendingVoiceSearchRequest {
+                selectedTab = .searchAssist
+            }
+        }
     }
 }
 
 #Preview {
-    ContentView(sharedURLs: .constant([]), sharedPDFs: .constant([]), pendingSearchQuery: .constant(nil))
+    ContentView(
+        sharedURLs: .constant([]),
+        sharedPDFs: .constant([]),
+        pendingSearchQuery: .constant(nil),
+        pendingVoiceSearchRequest: .constant(false)
+    )
         .frame(width: 900, height: 700)
 }

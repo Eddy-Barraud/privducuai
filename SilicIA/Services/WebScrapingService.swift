@@ -11,6 +11,46 @@ import Combine
 @MainActor
 /// Fetches and extracts readable text content from web pages.
 class WebScrapingService: ObservableObject {
+    /// App-specific User-Agent identifying SilicIA. Update version/contact as needed.
+    /// Format recommendation: AppName/Version (Platform; Device) Engine; +ContactURL
+    private static let userAgent: String = {
+        // You can optionally make these dynamic using Bundle info and UIDevice.
+        let appName = "SilicIA"
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        #if os(iOS)
+        let platform = "iOS"
+        #elseif os(macOS)
+        let platform = "macOS"
+        #elseif os(watchOS)
+        let platform = "watchOS"
+        #elseif os(tvOS)
+        let platform = "tvOS"
+        #elseif os(visionOS)
+        let platform = "visionOS"
+        #else
+        let platform = "AppleOS"
+        #endif
+        let device = {
+            #if os(iOS)
+            return UIDevice.current.userInterfaceIdiom == .pad ? "iPad" : "iPhone"
+            #elseif os(macOS)
+            return "Mac"
+            #elseif os(watchOS)
+            return "AppleWatch"
+            #elseif os(tvOS)
+            return "AppleTV"
+            #elseif os(visionOS)
+            return "visionOS"
+            #else
+            return "Device"
+            #endif
+        }()
+        // Include WebKit engine hint and a contact URL per good scraping etiquette
+        let engine = "AppleWebKit/605.1.15"
+        let contact = "+https://github.com/Eddy-Barraud/SilicIA/discussions"
+        return "\(appName)/\(appVersion) (\(platform); \(device)) \(engine); \(contact)"
+    }()
+
     @Published var isScrapingContent = false
 
     #if DEBUG
@@ -50,7 +90,7 @@ class WebScrapingService: ObservableObject {
 
         do {
             var request = URLRequest(url: url)
-            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
 
             let (data, response) = try await session.data(for: request)
 
@@ -209,3 +249,4 @@ class WebScrapingService: ObservableObject {
         return result
     }
 }
+

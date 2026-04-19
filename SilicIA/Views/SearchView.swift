@@ -20,11 +20,14 @@ struct SearchView: View {
     @Environment(\.colorScheme) private var colorScheme
     let initialQuery: String?
     let onInitialQueryHandled: (() -> Void)?
+    let initialVoiceSearch: Bool
+    let onInitialVoiceSearchHandled: (() -> Void)?
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
 
     @StateObject private var searchService = DuckDuckGoService()
     @StateObject private var aiService = AIService()
+    @StateObject private var speechRecognitionService = SpeechRecognitionService()
 
     @State private var searchQuery = ""
     @State private var searchResults: [SearchResult] = []
@@ -50,11 +53,15 @@ struct SearchView: View {
     init(
         initialQuery: String? = nil,
         onInitialQueryHandled: (() -> Void)? = nil,
+        initialVoiceSearch: Bool = false,
+        onInitialVoiceSearchHandled: (() -> Void)? = nil,
         chatService: ChatService,
         onOfflineQuery: ((String) -> Void)? = nil
     ) {
         self.initialQuery = initialQuery
         self.onInitialQueryHandled = onInitialQueryHandled
+        self.initialVoiceSearch = initialVoiceSearch
+        self.onInitialVoiceSearchHandled = onInitialVoiceSearchHandled
         self.chatService = chatService
         self.onOfflineQuery = onOfflineQuery
     }
@@ -93,6 +100,10 @@ struct SearchView: View {
 
     private var maxAllowedContextTokensForCurrentResponse: Int {
         AppSettings.maxAllowedContextTokens(forResponseTokens: settings.maxResponseTokens)
+    }
+
+    private var speechLocale: Locale {
+        settings.language == .french ? Locale(identifier: "fr-FR") : Locale(identifier: "en-US")
     }
 
     private var effectiveContextTokens: Int {
@@ -140,12 +151,19 @@ struct SearchView: View {
         .onAppear {
             settings = AppSettings.load()
             consumeInitialQueryIfNeeded()
+            consumeInitialVoiceSearchIfNeeded()
         }
         .onChange(of: settings) {
             settings.save()
         }
         .onChange(of: initialQuery) {
             consumeInitialQueryIfNeeded()
+        }
+        .onChange(of: initialVoiceSearch) {
+            consumeInitialVoiceSearchIfNeeded()
+        }
+        .onDisappear {
+            speechRecognitionService.stop()
         }
         #if canImport(UIKit)
         .simultaneousGesture(
@@ -201,6 +219,16 @@ struct SearchView: View {
                         performSearch()
                     }
 
+                Button {
+                    toggleVoiceRecognition()
+                } label: {
+                    Image(systemName: speechRecognitionService.isListening ? "mic.fill" : "mic")
+                        .foregroundColor(speechRecognitionService.isListening ? .red : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help(settings.language == .french ? "Dictée vocale" : "Voice dictation")
+                .disabled(searchService.isSearching)
+
                 if !searchQuery.isEmpty {
                     Button(action: { searchQuery = "" }) {
                         Image(systemName: "xmark.circle.fill")
@@ -212,6 +240,14 @@ struct SearchView: View {
             .padding(10)
             .background(controlBackgroundColor)
             .cornerRadius(8)
+
+            if let speechError = speechRecognitionService.errorMessage,
+               !speechError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(speechError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
 
             HStack(spacing: 8) {
                 Button(action: {
@@ -689,6 +725,7 @@ struct SearchView: View {
 
         let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return }
+        speechRecognitionService.stop()
         searchQuery = trimmedQuery
 
         let requestID = UUID()
@@ -795,6 +832,7 @@ struct SearchView: View {
     /// Resets all search and summary state to the initial home screen.
     private func goHome() {
         activeSearchRequestID = UUID()
+        speechRecognitionService.stop()
         searchQuery = ""
         searchResults = []
         showingSummary = false
@@ -826,7 +864,35 @@ struct SearchView: View {
         }
         searchQuery = trimmed
         onInitialQueryHandled?()
+
+        guard !initialVoiceSearch else { return }
         performSearch()
+    }
+
+    private func consumeInitialVoiceSearchIfNeeded() {
+        guard initialVoiceSearch else { return }
+        onInitialVoiceSearchHandled?()
+        startVoiceRecognition()
+    }
+
+    private func startVoiceRecognition() {
+        speechRecognitionService.start(
+            initialText: searchQuery,
+            locale: speechLocale,
+            onTextUpdate: { recognizedText in
+                searchQuery = recognizedText
+            }
+        )
+    }
+
+    private func toggleVoiceRecognition() {
+        speechRecognitionService.toggle(
+            initialText: searchQuery,
+            locale: speechLocale,
+            onTextUpdate: { recognizedText in
+                searchQuery = recognizedText
+            }
+        )
     }
 }
 

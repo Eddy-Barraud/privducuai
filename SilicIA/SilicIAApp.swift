@@ -20,6 +20,7 @@ struct SilicIAApp: App {
     @State private var sharedURLs: [String] = []
     @State private var sharedPDFs: [URL] = []
     @State private var pendingSearchQuery: String?
+    @State private var pendingVoiceSearchRequest = false
 #if os(macOS)
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 #endif
@@ -30,7 +31,8 @@ struct SilicIAApp: App {
             ContentView(
                 sharedURLs: $sharedURLs,
                 sharedPDFs: $sharedPDFs,
-                pendingSearchQuery: $pendingSearchQuery
+                pendingSearchQuery: $pendingSearchQuery,
+                pendingVoiceSearchRequest: $pendingVoiceSearchRequest
             )
                 .onOpenURL { url in
                     handleIncomingURL(url)
@@ -66,7 +68,12 @@ struct SilicIAApp: App {
 
         if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
            url.scheme?.lowercased() == "silicia",
-           let queryItems = components.queryItems {
+            let queryItems = components.queryItems {
+            let shouldStartVoiceSearch = queryItems.contains {
+                $0.name.lowercased() == "voice"
+                && ($0.value?.lowercased() == "1" || $0.value?.lowercased() == "true")
+            }
+
             if components.host?.lowercased() == "share" || components.path.lowercased().contains("share") {
                 let incomingURLs = queryItems
                     .filter { $0.name == "url" }
@@ -96,11 +103,13 @@ struct SilicIAApp: App {
             if (components.host?.lowercased() == "search" || components.path.lowercased().contains("search")),
                queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value == nil {
                 pendingSearchQuery = ""
+                pendingVoiceSearchRequest = shouldStartVoiceSearch
                 return
             }
             if let searchQuery = queryItems.first(where: { $0.name == "q" || $0.name == "query" })?.value,
                !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 pendingSearchQuery = searchQuery
+                pendingVoiceSearchRequest = shouldStartVoiceSearch
                 return
             }
             if let sharedURL = queryItems.first(where: { $0.name == "url" })?.value,

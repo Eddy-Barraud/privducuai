@@ -34,6 +34,8 @@ struct ChatView: View {
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
     @State private var isWebSearchEnabled = false
+    @StateObject private var speechRecognitionService = SpeechRecognitionService()
+    @State private var activeVoiceInputTarget: VoiceInputTarget?
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -69,6 +71,10 @@ struct ChatView: View {
 
     private var estimatedMaxContextWords: Int {
         TokenBudgeting.estimatedContextWords(forTokens: effectiveContextTokens)
+    }
+
+    private var speechLocale: Locale {
+        settings.language == .french ? Locale(identifier: "fr-FR") : Locale(identifier: "en-US")
     }
 
     /// Renders chat transcript, composer, and context inputs.
@@ -126,6 +132,10 @@ struct ChatView: View {
                 settings = AppSettings.load()
                 chatService.modelContext = modelContext
                 mergeSharedInputsIfNeeded()
+            }
+            .onDisappear {
+                speechRecognitionService.stop()
+                activeVoiceInputTarget = nil
             }
             .onChange(of: settings) {
                 settings.save()
@@ -366,24 +376,41 @@ struct ChatView: View {
 
     /// Renders input area and send action.
     private var composerView: some View {
-        HStack(alignment: .bottom, spacing: 10) {
-            TextField("Type a message", text: $messageInput, axis: .vertical)
-                .lineLimit(1...5)
-                .textFieldStyle(.roundedBorder)
-                .focused($isInputFieldFocused)
-                #if canImport(UIKit)
-                .textInputAutocapitalization(.sentences)
-                .autocorrectionDisabled(false)
-                #endif
-                .onSubmit {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 10) {
+                TextField("Type a message", text: $messageInput, axis: .vertical)
+                    .lineLimit(1...5)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($isInputFieldFocused)
+                    #if canImport(UIKit)
+                    .textInputAutocapitalization(.sentences)
+                    .autocorrectionDisabled(false)
+                    #endif
+                    .onSubmit {
+                        submitMessage()
+                    }
+
+                Button {
+                    toggleVoiceRecognition(for: .message)
+                } label: {
+                    Image(systemName: activeVoiceInputTarget == .message && speechRecognitionService.isListening ? "mic.fill" : "mic")
+                        .foregroundColor(activeVoiceInputTarget == .message && speechRecognitionService.isListening ? .red : .secondary)
+                }
+                .buttonStyle(.plain)
+
+                Button("Send") {
                     submitMessage()
                 }
-
-            Button("Send") {
-                submitMessage()
+                .buttonStyle(.borderedProminent)
+                .disabled(messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatService.isResponding)
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(messageInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatService.isResponding)
+
+            if let speechError = speechRecognitionService.errorMessage,
+               !speechError.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(speechError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
         }
     }
 
@@ -455,6 +482,14 @@ struct ChatView: View {
                 )
                 .textFieldStyle(.roundedBorder)
                 .focused($isInputFieldFocused)
+
+                Button {
+                    toggleVoiceRecognition(for: .context(source.id))
+                } label: {
+                    Image(systemName: activeVoiceInputTarget == .context(source.id) && speechRecognitionService.isListening ? "mic.fill" : "mic")
+                        .foregroundColor(activeVoiceInputTarget == .context(source.id) && speechRecognitionService.isListening ? .red : .secondary)
+                }
+                .buttonStyle(.plain)
             case .pdf:
                 if case .pdf(let url) = source.kind {
                     Text(url?.lastPathComponent ?? "PDF")
@@ -739,6 +774,8 @@ struct ChatView: View {
     /// Resets transcript and local context inputs to start a new conversation.
     private func startOver() {
         preanalysisTask?.cancel()
+        speechRecognitionService.stop()
+        activeVoiceInputTarget = nil
         messageInput = ""
         contextSources = [ContextSource(kind: .url(text: ""))]
         isWebSearchEnabled = false
@@ -747,6 +784,57 @@ struct ChatView: View {
         chatService.resetConversation()
         _ = DroppedPDFStore.clearAll()
     }
+
+    private func toggleVoiceRecognition(for target: VoiceInputTarget) {
+        if speechRecognitionService.isListening, activeVoiceInputTarget == target {
+            speechRecognitionService.stop()
+            activeVoiceInputTarget = nil
+            return
+        }
+
+        speechRecognitionService.stop()
+        activeVoiceInputTarget = target
+
+        speechRecognitionService.start(
+            initialText: text(for: target),
+            locale: speechLocale,
+            onTextUpdate: { recognizedText in
+                applyRecognizedText(recognizedText, to: target)
+            },
+            onStop: {
+                activeVoiceInputTarget = nil
+            }
+        )
+    }
+
+    private func text(for target: VoiceInputTarget) -> String {
+        switch target {
+        case .message:
+            return messageInput
+        case .context(let sourceID):
+            guard let source = contextSources.first(where: { $0.id == sourceID }),
+                  case .url(let text) = source.kind else {
+                return ""
+            }
+            return text
+        }
+    }
+
+    private func applyRecognizedText(_ text: String, to target: VoiceInputTarget) {
+        switch target {
+        case .message:
+            messageInput = text
+        case .context(let sourceID):
+            guard let index = contextSources.firstIndex(where: { $0.id == sourceID }) else { return }
+            contextSources[index].kind = .url(text: text)
+            scheduleContextPreanalysis()
+        }
+    }
+}
+
+private enum VoiceInputTarget: Equatable {
+    case message
+    case context(UUID)
 }
 
 private struct ContextSource: Identifiable {
