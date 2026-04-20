@@ -11,6 +11,6 @@ Reponds de facon concise et pratique.
 Limite de sortie : {{maxOutputTokens}} tokens maximum (environ {{maxOutputCharacters}} caracteres).
 Quand c'est pertinent, inclus des expressions ou formules mathematiques.
 Format de sortie attendu : texte concis avec du LaTeX leger quand utile.
-Formats math autorises : inline $...$ et bloc simple \[...\].
+Formats math autorises : inline $...$ et bloc simple $$..$$.
 N'ecris jamais un document LaTeX complet.
 N'utilise jamais \documentclass, \begin{document} ou \end{document}.

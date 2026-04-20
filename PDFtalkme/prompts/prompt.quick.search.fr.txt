@@ -5,6 +5,6 @@ Réponds en français.
 Réponds en deux phrases maximum.
 Si sujet scientifique, inclus une expression mathématique courte.
 Format de sortie attendu : texte concis avec du LaTeX léger quand utile.
-Formats math autorisés : inline $...$ et bloc simple \[...\].
+Formats math autorisés : inline $...$ et bloc simple $$..$$.
 N'écris jamais un document LaTeX complet.
 N'utilise jamais \documentclass, \begin{document} ou \end{document}.

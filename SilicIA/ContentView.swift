@@ -63,7 +63,7 @@ struct ContentView: View {
                                     pdfURLs: [],
                                     includeWebSearch: false,
                                     language: settings.language,
-                                    temperature: 0.7,
+                                    temperature: settings.temperature,
                                     maxResponseTokens: settings.maxResponseTokens,
                                     maxContextTokens: settings.maxContextTokens
                                 )

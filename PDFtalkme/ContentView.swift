@@ -356,7 +356,7 @@ struct ContentView: View {
     @ViewBuilder
     private func renderedMessageContent(_ message: PDFChatMessage) -> some View {
         if message.role == .assistant {
-            LaTeX(message.content)
+            LaTeX(ModelOutputLaTeXSanitizer.sanitize(message.content))
                 .font(.body)
                 .foregroundColor(colorScheme == .dark ? .white : .black)
         } else {
@@ -803,6 +803,135 @@ struct ContentView: View {
         )
     }
 
+}
+
+private enum ModelOutputLaTeXSanitizer {
+    static func sanitize(_ input: String) -> String {
+        var sanitized = input
+        sanitized = replacingRegex(
+            in: sanitized,
+            pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
+            with: " $1"
+        )
+        sanitized = replacingRegex(
+            in: sanitized,
+            pattern: #"(\\[A-Za-z]+)(?=[0-9A-Za-z])"#,
+            with: "$1 "
+        )
+        sanitized = replacingDigitPowers(in: sanitized)
+        sanitized = closeUnbalancedMathDelimiters(in: sanitized)
+        return sanitized
+    }
+
+    private static func replacingDigitPowers(in text: String) -> String {
+        var output = text
+        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^\{([^{}]+)\}"#)
+        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^(-?\d+)"#)
+        return output
+    }
+
+    private static func replacingDigitPowerMatches(in text: String, pattern: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard !matches.isEmpty else { return text }
+
+        var output = text
+        for match in matches.reversed() {
+            guard match.numberOfRanges >= 3,
+                  let wholeRange = Range(match.range(at: 0), in: output),
+                  let baseRange = Range(match.range(at: 1), in: output),
+                  let exponentRange = Range(match.range(at: 2), in: output) else {
+                continue
+            }
+
+            let base = String(output[baseRange])
+            let exponent = String(output[exponentRange])
+            output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
+        }
+        return output
+    }
+
+    private static func closeUnbalancedMathDelimiters(in text: String) -> String {
+        var singleDollarCount = 0
+        var doubleDollarCount = 0
+        var openParenCount = 0
+        var closeParenCount = 0
+        var openBracketCount = 0
+        var closeBracketCount = 0
+
+        let characters = Array(text)
+        var index = 0
+
+        while index < characters.count {
+            let current = characters[index]
+
+            if current == "\\" {
+                if index + 1 < characters.count {
+                    let next = characters[index + 1]
+                    if next == "(" {
+                        openParenCount += 1
+                        index += 2
+                        continue
+                    }
+                    if next == ")" {
+                        closeParenCount += 1
+                        index += 2
+                        continue
+                    }
+                    if next == "[" {
+                        openBracketCount += 1
+                        index += 2
+                        continue
+                    }
+                    if next == "]" {
+                        closeBracketCount += 1
+                        index += 2
+                        continue
+                    }
+                    if next == "$" {
+                        index += 2
+                        continue
+                    }
+                }
+                index += 1
+                continue
+            }
+
+            if current == "$" {
+                if index + 1 < characters.count, characters[index + 1] == "$" {
+                    doubleDollarCount += 1
+                    index += 2
+                } else {
+                    singleDollarCount += 1
+                    index += 1
+                }
+                continue
+            }
+
+            index += 1
+        }
+
+        var output = text
+        if doubleDollarCount % 2 != 0 {
+            output += "$$"
+        }
+        if singleDollarCount % 2 != 0 {
+            output += "$"
+        }
+        if openParenCount > closeParenCount {
+            output += String(repeating: "\\)", count: openParenCount - closeParenCount)
+        }
+        if openBracketCount > closeBracketCount {
+            output += String(repeating: "\\]", count: openBracketCount - closeBracketCount)
+        }
+
+        return output
+    }
+
+    private static func replacingRegex(in text: String, pattern: String, with template: String) -> String {
+        text.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
+    }
 }
 
 private struct PDFDocumentTab: Identifiable, Equatable {

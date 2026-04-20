@@ -54,7 +54,7 @@ struct SilicIAApp: App {
 #endif
         }
         #if os(macOS)
-            .defaultSize(width: 1284, height: 1662)
+            .defaultSize(width: 500, height: 900)
         #endif
         .modelContainer(for: [Conversation.self, Message.self])
     }

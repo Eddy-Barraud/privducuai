@@ -1,11 +1,10 @@
 Question: {{query}}
 
-If not sure about answer, only output "Waiting web for precisions"
+If not sure about answer, don't say anything.
 Answer in a short, precise and factual manner.
 Answer in English.
 Answer in two sentences maximum.
-If scientific field, include a short mathematical expression.
-Output format: concise text with lightweight LaTeX formatting when useful.
-Allowed math formatting: inline $...$ and simple block \[...\].
+If scientific field, include a short mathematical expression with LaTeX.
+Encapsulates LaTeX code inline by $.
 Never output a full LaTeX document.
 Never use \documentclass, \begin{document}, or \end{document}.

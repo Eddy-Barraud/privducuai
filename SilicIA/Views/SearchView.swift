@@ -125,9 +125,6 @@ struct SearchView: View {
             // Header
             headerView
 
-            // Search Bar
-            searchBarView
-
             // Settings panel available in every search state
             if showSettings {
                 settingsPanel
@@ -146,6 +143,8 @@ struct SearchView: View {
             } else {
                 emptyStateView
             }
+            // Search Bar
+            searchBarView
         }
         .background(windowBackgroundColor)
         .animation(.easeInOut, value: showSettings)
@@ -207,7 +206,7 @@ struct SearchView: View {
                 Image(systemName: "magnifyingglass")
                     .foregroundColor(.secondary)
 
-                TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery)
+                TextField(settings.language == .french ? "Rechercher le web..." : "Search the web...", text: $searchQuery,  axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.plain)
                     .font(.body)
@@ -300,6 +299,7 @@ struct SearchView: View {
         .cornerRadius(10)
         .padding(.horizontal)
         .padding(.vertical, 8)
+        
     }
 
     // MARK: - Results View
@@ -385,7 +385,7 @@ struct SearchView: View {
                         .foregroundColor(.secondary)
                         .italic()
                 } else if !firstGuessText.isEmpty {
-                    LaTeX(firstGuessText)
+                    LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
                         .font(.body)
                         .foregroundColor(colorScheme == .dark ? .white : .black)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -408,7 +408,7 @@ struct SearchView: View {
                         .foregroundColor(.secondary)
                         .italic()
                 } else if !aiService.summary.isEmpty {
-                    LaTeX(aiService.summary)
+                    LaTeX(ModelOutputLaTeXSanitizer.sanitize(aiService.summary))
                         .font(.body)
                         .foregroundColor(colorScheme == .dark ? .white : .black)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -497,7 +497,7 @@ struct SearchView: View {
                                 .foregroundColor(.secondary)
                                 .italic()
                         } else if !firstGuessText.isEmpty {
-                            LaTeX(firstGuessText)
+                            LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
                                 .font(.body)
                                 .foregroundColor(colorScheme == .dark ? .white : .black)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -755,6 +755,9 @@ struct SearchView: View {
                 )
                 guard activeSearchRequestID == requestID else { return }
                 firstGuessText = firstGuess
+                #if DEBUG
+                debugLog(firstGuessText)
+                #endif
                 firstGuessElapsedSeconds = Date().timeIntervalSince(firstGuessStart)
                 isGeneratingFirstGuess = false
             }
@@ -848,6 +851,9 @@ struct SearchView: View {
         )
 
         #if DEBUG
+        if !aiService.summary.isEmpty {
+            debugLog("Generated summary: \(aiService.summary)")
+        }
         for metric in aiService.debugTimings {
             debugLog("\(metric.name): \(String(format: "%.3f s", metric.seconds))")
         }
@@ -925,6 +931,52 @@ struct SearchView: View {
                 searchQuery = recognizedText
             }
         )
+    }
+}
+
+private enum ModelOutputLaTeXSanitizer {
+    static func sanitize(_ input: String) -> String {
+        var sanitized = input
+        sanitized = replacingRegex(
+            in: sanitized,
+            pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
+            with: " $1"
+        )
+        sanitized = replacingDigitPowers(in: sanitized)
+        return sanitized
+    }
+
+    private static func replacingDigitPowers(in text: String) -> String {
+        var output = text
+        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^\{([^{}]+)\}"#)
+        output = replacingDigitPowerMatches(in: output, pattern: #"(?<!\\mathrm\{)(\d+)\^(-?\d+)"#)
+        return output
+    }
+
+    private static func replacingDigitPowerMatches(in text: String, pattern: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+        let nsText = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: nsText.length))
+        guard !matches.isEmpty else { return text }
+
+        var output = text
+        for match in matches.reversed() {
+            guard match.numberOfRanges >= 3,
+                  let wholeRange = Range(match.range(at: 0), in: output),
+                  let baseRange = Range(match.range(at: 1), in: output),
+                  let exponentRange = Range(match.range(at: 2), in: output) else {
+                continue
+            }
+
+            let base = String(output[baseRange])
+            let exponent = String(output[exponentRange])
+            output.replaceSubrange(wholeRange, with: "\\mathrm{\(base)}^\\mathrm{\(exponent)}")
+        }
+        return output
+    }
+
+    private static func replacingRegex(in text: String, pattern: String, with template: String) -> String {
+        text.replacingOccurrences(of: pattern, with: template, options: .regularExpression)
     }
 }
 

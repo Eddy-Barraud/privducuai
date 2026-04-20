@@ -16,9 +16,9 @@ enum ModelLanguage: String, CaseIterable, Codable {
 /// User-configurable settings controlling search and summary behavior.
 struct AppSettings: Codable, Equatable {
     var maxSearchResults: Int = 5
-    var maxResponseTokens: Int = 2000
-    var temperature: Double = 0.3
-    var maxContextTokens: Int = 3500
+    var maxResponseTokens: Int = 1500
+    var temperature: Double = 0.7
+    var maxContextTokens: Int = 2400
     var language: ModelLanguage = .english
 
     private static let storageKey = "SilicIA.AppSettings"
