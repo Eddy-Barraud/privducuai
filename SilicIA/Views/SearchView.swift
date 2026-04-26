@@ -11,6 +11,7 @@ import LaTeXSwiftUI
 import AppKit
 #elseif canImport(UIKit)
 import UIKit
+import SafariServices
 #endif
 
 /// Main search experience that fetches web results and generates AI summaries.
@@ -386,17 +387,27 @@ struct SearchView: View {
                             .font(.subheadline)
                             .fontWeight(.semibold)
 
-                        if let attributedCitations = try? AttributedString(
+                         if let attributedCitations = try? AttributedString(
                             markdown: aiService.citations,
                             options: AttributedString.MarkdownParsingOptions(
                                 interpretedSyntax: .inlineOnlyPreservingWhitespace
                             )
                         ) {
+                            #if canImport(UIKit)
+                            // Extract URLs from citations and make them tappable
+                            let citationText = extractAndMakeURLsTappable(from: aiService.citations)
+                            citationText
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .tint(.accentColor)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            #else
                             Text(attributedCitations)
                                 .font(.footnote)
                                 .foregroundColor(.secondary)
                                 .tint(.accentColor)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                            #endif
                         } else {
                             Text(aiService.citations)
                                 .font(.footnote)
@@ -646,6 +657,23 @@ struct SearchView: View {
         isSearchFieldFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+
+    private func openURLInSafari(_ url: URL) {
+        DispatchQueue.main.async {
+            let safariViewController = SFSafariViewController(url: url)
+            safariViewController.modalPresentationStyle = .fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+               let rootViewController = windowScene.windows.first?.rootViewController {
+                rootViewController.present(safariViewController, animated: true, completion: nil)
+            } else {
+                // Fallback to UIApplication.open if SFSafariViewController presentation fails
+                if UIApplication.shared.canOpenURL(url) {
+                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                }
+            }
+        }
+    }
     #endif
 
     private func copyPlainTextToClipboard(_ text: String) {
@@ -656,6 +684,79 @@ struct SearchView: View {
         UIPasteboard.general.string = text
         #endif
     }
+
+    #if canImport(UIKit)
+    @ViewBuilder
+    private func extractAndMakeURLsTappable(from text: String) -> some View {
+        let parts = extractURLsFromText(text)
+        
+        if parts.isEmpty {
+            Text(text)
+        } else {
+            VStack(alignment: .leading, spacing: 2) {
+                ForEach(parts.indices, id: \.self) { index in
+                    let part = parts[index]
+                    if part.isURL, let url = URL(string: part.text) {
+                        Button(action: {
+                            openURLInSafari(url)
+                        }) {
+                            Text(part.text)
+                                .font(.footnote)
+                                .foregroundColor(.accentColor)
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(part.text)
+                            .font(.footnote)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func extractURLsFromText(_ text: String) -> [TextPart] {
+        let pattern = "(https?://[^\\s]+)"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else {
+            return [TextPart(text: text, isURL: false)]
+        }
+        
+        let matches = regex.matches(in: text, range: NSRange(text.startIndex..., in: text))
+        var parts: [TextPart] = []
+        var currentIndex = text.startIndex
+        
+        for match in matches {
+            let range = Range(match.range, in: text)!
+            
+            // Add text before the URL
+            if currentIndex < range.lowerBound {
+                let substring = String(text[currentIndex..<range.lowerBound])
+                parts.append(TextPart(text: substring, isURL: false))
+            }
+            
+            // Add the URL
+            let urlString = String(text[range])
+            parts.append(TextPart(text: urlString, isURL: true))
+            
+            currentIndex = range.upperBound
+        }
+        
+        // Add remaining text after last URL
+        if currentIndex < text.endIndex {
+            let substring = String(text[currentIndex...])
+            parts.append(TextPart(text: substring, isURL: false))
+        }
+        
+        return parts.isEmpty ? [TextPart(text: text, isURL: false)] : parts
+    }
+
+    private struct TextPart: Identifiable {
+        let id = UUID()
+        let text: String
+        let isURL: Bool
+    }
+    #endif
 
     private func debugLog(_ message: String) {
         #if DEBUG
@@ -978,11 +1079,42 @@ private enum ModelOutputLaTeXSanitizer {
 /// Displays one search result row with link, source host, and snippet preview.
 struct SearchResultCard: View {
     let result: SearchResult
+    #if canImport(UIKit)
+    private func openURLInSafari(_ url: URL) {
+        DispatchQueue.main.async {
+            let safariViewController = SFSafariViewController(url: url)
+            safariViewController.modalPresentationStyle = .fullScreen
+            
+            if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+               let rootViewController = windowScene.windows.first?.rootViewController {
+                rootViewController.present(safariViewController, animated: true, completion: nil)
+            } else {
+                // Fallback to UIApplication.open if SFSafariViewController presentation fails
+                if UIApplication.shared.canOpenURL(url) {
+                    UIApplication.shared.open(url, options: [:], completionHandler: nil)
+                }
+            }
+        }
+    }
+    #endif
 
     /// Renders one result card with title link, host, and snippet.
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Title
+            #if canImport(UIKit)
+            Button(action: {
+                if let url = URL(string: result.url) {
+                    openURLInSafari(url)
+                }
+            }) {
+                Text(result.title)
+                    .font(.headline)
+                    .foregroundColor(.accentColor)
+                    .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
+            #else
             Link(destination: URL(string: result.url)!) {
                 Text(result.title)
                     .font(.headline)
@@ -990,6 +1122,7 @@ struct SearchResultCard: View {
                     .multilineTextAlignment(.leading)
             }
             .buttonStyle(.plain)
+            #endif
 
             // URL
             Text(formatURL(result.url))
