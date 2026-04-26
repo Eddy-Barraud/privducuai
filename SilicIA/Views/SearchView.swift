@@ -235,8 +235,9 @@ struct SearchView: View {
                     onOfflineQuery?(trimmedQuery)
                 }) {
                     Label(
-                        "Offline",
-                        systemImage: "bolt.fill"
+                        "Chat",
+                        // chat bubbles
+                        systemImage: "bubble.left.and.bubble.right"
                     )
                     .font(.subheadline)
                 }
