@@ -38,7 +38,7 @@ final class ChatService: ObservableObject {
     private var pendingSaveTask: Task<Void, Never>?
 
     // Keep web retrieval bounded to control latency and context size.
-    private static let maxWebContextURLs = 8
+    private static let maxWebContextURLCap = 30
     // Chunk sizes tuned to preserve locality while allowing many chunks in a 4096-token budget.
     private static let webChunkMaxTokens = 240
     private static let webChunkOverlapTokens = 40
@@ -55,6 +55,7 @@ final class ChatService: ObservableObject {
     private var preAnalyzedChunks: [RAGChunk] = []
     private var preAnalyzedMaxContextTokens: Int?
     private var preAnalyzedMaxOutputTokens: Int?
+    private var preAnalyzedMaxWebResults: Int?
 
     /// Sends a user message and appends the assistant response.
     func sendMessage(
@@ -62,6 +63,7 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
+        maxWebResults: Int,
         language: ModelLanguage,
         temperature: Double,
         maxResponseTokens: Int,
@@ -78,8 +80,10 @@ final class ChatService: ObservableObject {
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
-            searchQuerySeed: includeWebSearch ? message : ""
+            searchQuerySeed: includeWebSearch ? message : "",
+            maxWebResults: maxWebResults
         )
+        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
         let hasRequestedContext = !contextKey.isEmpty
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
@@ -89,6 +93,7 @@ final class ChatService: ObservableObject {
         let canUsePreAnalyzed = contextKey == preAnalyzedContextKey
             && effectiveMaxContextTokens == preAnalyzedMaxContextTokens
             && effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens
+            && effectiveMaxWebResults == preAnalyzedMaxWebResults
             && (!hasRequestedContext || !preAnalyzedChunks.isEmpty)
         debugContext("sendMessage contextKeyEmpty=\(contextKey.isEmpty) pdfCount=\(pdfURLs.count) preAnalyzedKeyMatch=\(contextKey == preAnalyzedContextKey) preAnalyzedChunks=\(preAnalyzedChunks.count) canUsePreAnalyzed=\(canUsePreAnalyzed)")
         let chunks: [RAGChunk]
@@ -101,12 +106,14 @@ final class ChatService: ObservableObject {
                 includeWebSearch: includeWebSearch,
                 currentMessage: message,
                 language: language,
+                maxWebResults: effectiveMaxWebResults,
                 maxContextTokens: effectiveMaxContextTokens
             )
             preAnalyzedContextKey = contextKey
             preAnalyzedChunks = chunks
             preAnalyzedMaxContextTokens = effectiveMaxContextTokens
             preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
+            preAnalyzedMaxWebResults = effectiveMaxWebResults
         }
         debugContext("sendMessage collected chunkCount=\(chunks.count)")
         let selected = await ragContextService.selectContext(
@@ -170,6 +177,7 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
+        maxWebResults: Int,
         maxContextTokens: Int,
         maxResponseTokens: Int
     ) async {
@@ -177,8 +185,10 @@ final class ChatService: ObservableObject {
             contextInput: contextInput,
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
-            searchQuerySeed: ""
+            searchQuerySeed: "",
+            maxWebResults: maxWebResults
         )
+        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
         let effectiveMaxOutputTokens = calculateEffectiveMaxOutputTokens(maxResponseTokens)
         let effectiveMaxContextTokens = calculateEffectiveContextTokens(
             requestedContextTokens: maxContextTokens,
@@ -189,13 +199,15 @@ final class ChatService: ObservableObject {
             preAnalyzedChunks = []
             preAnalyzedMaxContextTokens = nil
             preAnalyzedMaxOutputTokens = nil
+            preAnalyzedMaxWebResults = nil
             isAnalyzingContext = false
             contextAnalysisProgress = 0
             return
         }
         if contextKey == preAnalyzedContextKey,
            effectiveMaxContextTokens == preAnalyzedMaxContextTokens,
-           effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens {
+           effectiveMaxOutputTokens == preAnalyzedMaxOutputTokens,
+           effectiveMaxWebResults == preAnalyzedMaxWebResults {
             return
         }
 
@@ -207,6 +219,7 @@ final class ChatService: ObservableObject {
             pdfURLs: pdfURLs,
             includeWebSearch: includeWebSearch,
             currentMessage: "",
+            maxWebResults: effectiveMaxWebResults,
             maxContextTokens: effectiveMaxContextTokens,
             reportProgress: true
         )
@@ -214,6 +227,7 @@ final class ChatService: ObservableObject {
         preAnalyzedChunks = chunks
         preAnalyzedMaxContextTokens = effectiveMaxContextTokens
         preAnalyzedMaxOutputTokens = effectiveMaxOutputTokens
+        preAnalyzedMaxWebResults = effectiveMaxWebResults
         debugContext("preAnalyzeContext completed chunkCount=\(chunks.count)")
     }
 
@@ -230,6 +244,7 @@ final class ChatService: ObservableObject {
         preAnalyzedChunks = []
         preAnalyzedMaxContextTokens = nil
         preAnalyzedMaxOutputTokens = nil
+        preAnalyzedMaxWebResults = nil
         currentConversation = nil
     }
 
@@ -240,6 +255,7 @@ final class ChatService: ObservableObject {
         includeWebSearch: Bool,
         currentMessage: String = "",
         language: ModelLanguage = .english,
+        maxWebResults: Int,
         maxContextTokens: Int,
         reportProgress: Bool = false
     ) async -> [RAGChunk] {
@@ -256,6 +272,7 @@ final class ChatService: ObservableObject {
         }
 
         let contextURLs = extractURLs(from: contextInput)
+        let effectiveMaxWebResults = clampedMaxWebResults(maxWebResults)
         var discoveredResults: [SearchResult] = []
         // Web discovery is send-time only because it needs the current user query.
         if includeWebSearch && !currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -263,7 +280,11 @@ final class ChatService: ObservableObject {
                 currentMessage: currentMessage,
                 contextInput: contextInput
             )
-            discoveredResults = await discoverWebResults(for: searchQuery, language: language)
+            discoveredResults = await discoverWebResults(
+                for: searchQuery,
+                language: language,
+                maxResults: effectiveMaxWebResults
+            )
         }
 
         var retrievedWebResults: [SearchResult] = []
@@ -309,7 +330,7 @@ final class ChatService: ObservableObject {
         if !urls.isEmpty {
             let scraped = await webScraper.scrapeMultiplePages(
                 urls: urls,
-                limit: min(urls.count, Self.maxWebContextURLs),
+                limit: min(urls.count, effectiveMaxWebResults),
                 maxCharacters: webScrapingCharacters
             )
             for url in urls {
@@ -369,14 +390,15 @@ final class ChatService: ObservableObject {
         return String(combined.prefix(Self.maxWebSearchQueryLength))
     }
 
-    private func discoverWebResults(for query: String, language: ModelLanguage) async -> [SearchResult] {
+    private func discoverWebResults(for query: String, language: ModelLanguage, maxResults: Int) async -> [SearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
+        let clampedMaxResults = clampedMaxWebResults(maxResults)
 
         do {
             let results = try await webSearchService.search(
                 query: trimmedQuery,
-                maxResults: Self.maxWebContextURLs,
+                maxResults: clampedMaxResults,
                 language: language
             )
 
@@ -403,7 +425,8 @@ final class ChatService: ObservableObject {
         contextInput: String,
         pdfURLs: [URL],
         includeWebSearch: Bool,
-        searchQuerySeed: String
+        searchQuerySeed: String,
+        maxWebResults: Int
     ) -> String {
         let normalizedContext = contextInput
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -415,7 +438,11 @@ final class ChatService: ObservableObject {
         if normalizedContext.isEmpty && normalizedPDFPaths.isEmpty && normalizedQuerySeed.isEmpty {
             return ""
         }
-        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)"
+        return "\(normalizedContext)||\(normalizedPDFPaths)||web:\(includeWebSearch)||query:\(normalizedQuerySeed)||maxWeb:\(clampedMaxWebResults(maxWebResults))"
+    }
+
+    private func clampedMaxWebResults(_ value: Int) -> Int {
+        min(max(value, AppSettings.maxSearchResultsRange.lowerBound), Self.maxWebContextURLCap)
     }
 
     private func deduplicatedURLs(_ urls: [String]) -> [String] {

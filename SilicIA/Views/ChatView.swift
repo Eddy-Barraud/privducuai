@@ -13,6 +13,7 @@ import LaTeXSwiftUI
 import AppKit
 #elseif canImport(UIKit)
 import UIKit
+import SafariServices
 #endif
 
 /// Chat UI that sends prompts and contextual documents to `ChatService`.
@@ -162,7 +163,12 @@ struct ChatView: View {
             }
             .buttonStyle(.bordered)
 
-            Button(action: { showSettings.toggle() }) {
+            Button(action: {
+                #if canImport(UIKit)
+                dismissKeyboard()
+                #endif
+                showSettings.toggle()
+            }) {
                 Image(systemName: "gear")
                     .font(.title2)
                     .foregroundColor(.secondary)
@@ -184,6 +190,21 @@ struct ChatView: View {
             }
 
             Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Nombre maximal de résultats web" : "Max Web Results")
+                        .font(.subheadline)
+                    Spacer()
+                    Text("\(settings.maxSearchResults)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Slider(value: Binding(
+                    get: { Double(settings.maxSearchResults) },
+                    set: { settings.maxSearchResults = Int($0) }
+                ), in: Double(AppSettings.maxSearchResultsRange.lowerBound)...Double(AppSettings.maxSearchResultsRange.upperBound), step: 1)
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -257,6 +278,23 @@ struct ChatView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(settings.language == .french ? "Langue du modèle" : "Model Language")
+                        .font(.subheadline)
+                    Spacer()
+                    Text(settings.language.rawValue)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                Picker("Language", selection: $settings.language) {
+                    ForEach(ModelLanguage.allCases, id: \.self) { lang in
+                        Text(lang.rawValue).tag(lang)
+                    }
+                }
+                .pickerStyle(.segmented)
             }
         }
         .padding()
@@ -348,10 +386,14 @@ struct ChatView: View {
                     Divider()
 
                     if let attributedCitations = try? AttributedString(markdown: citations) {
+                        #if canImport(UIKit)
+                        citationLinksView(from: citations)
+                        #else
                         Text(attributedCitations)
                             .font(.footnote)
                             .foregroundColor(.secondary)
                             .tint(.accentColor)
+                        #endif
                     } else {
                         Text(citations)
                             .font(.footnote)
@@ -518,6 +560,7 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 includeWebSearch: isWebSearchEnabled,
+                maxWebResults: settings.maxSearchResults,
                 language: settings.language,
                 temperature: settings.temperature,
                 maxResponseTokens: settings.maxResponseTokens,
@@ -683,6 +726,109 @@ struct ChatView: View {
     }
 
     #if canImport(UIKit)
+    @ViewBuilder
+    private func citationLinksView(from text: String) -> some View {
+        let links = extractCitationLinks(from: text)
+
+        if links.isEmpty {
+            Text(text)
+                .font(.footnote)
+                .foregroundColor(.secondary)
+        } else {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(Array(links.enumerated()), id: \.element.id) { index, link in
+                    Button(action: {
+                        openURLInSafari(link.url)
+                    }) {
+                        Text("\(index + 1). \(displayURL(link.url))")
+                            .font(.footnote)
+                            .foregroundColor(.accentColor)
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .underline()
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func extractCitationLinks(from text: String) -> [CitationLink] {
+        var extracted: [CitationLink] = []
+
+        if let markdownRegex = try? NSRegularExpression(pattern: #"\[[^\]]+\]\((https?://[^\s)]+)\)"#) {
+            let nsRange = NSRange(text.startIndex..., in: text)
+            let matches = markdownRegex.matches(in: text, range: nsRange)
+            for match in matches {
+                guard match.numberOfRanges > 1,
+                      let range = Range(match.range(at: 1), in: text) else {
+                    continue
+                }
+                let candidate = String(text[range])
+                if let url = normalizedURL(from: candidate) {
+                    extracted.append(CitationLink(url: url))
+                }
+            }
+        }
+
+        if extracted.isEmpty,
+           let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            let nsRange = NSRange(text.startIndex..., in: text)
+            let matches = detector.matches(in: text, range: nsRange)
+            for match in matches {
+                guard let range = Range(match.range, in: text) else { continue }
+                let candidate = String(text[range])
+                if let url = normalizedURL(from: candidate) {
+                    extracted.append(CitationLink(url: url))
+                }
+            }
+        }
+
+        var seen = Set<String>()
+        return extracted.filter { link in
+            let key = link.url.absoluteString
+            if seen.contains(key) {
+                return false
+            }
+            seen.insert(key)
+            return true
+        }
+    }
+
+    private func normalizedURL(from candidate: String) -> URL? {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleaned = trimmed.trimmingCharacters(in: CharacterSet(charactersIn: ".,;:)]}"))
+        return URL(string: cleaned)
+    }
+
+    private func displayURL(_ url: URL) -> String {
+        let host = url.host ?? url.absoluteString
+        let path = url.path == "/" ? "" : url.path
+        return host + path
+    }
+
+    private func openURLInSafari(_ url: URL) {
+        DispatchQueue.main.async {
+            let safariViewController = SFSafariViewController(url: url)
+            safariViewController.modalPresentationStyle = .fullScreen
+
+            if let windowScene = UIApplication.shared.connectedScenes.first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+               let rootViewController = windowScene.windows.first?.rootViewController {
+                rootViewController.present(safariViewController, animated: true, completion: nil)
+            } else if UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url, options: [:], completionHandler: nil)
+            }
+        }
+    }
+
+    private struct CitationLink: Identifiable {
+        let id = UUID()
+        let url: URL
+    }
+    #endif
+
+    #if canImport(UIKit)
     private func dismissKeyboard() {
         isInputFieldFocused = false
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
@@ -731,6 +877,7 @@ struct ChatView: View {
                 contextInput: contextInput,
                 pdfURLs: selectedPDFs,
                 includeWebSearch: isWebSearchEnabled,
+                maxWebResults: settings.maxSearchResults,
                 maxContextTokens: settings.maxContextTokens,
                 maxResponseTokens: settings.maxResponseTokens
             )
@@ -752,19 +899,35 @@ struct ChatView: View {
 private enum ModelOutputLaTeXSanitizer {
     static func sanitize(_ input: String) -> String {
         var sanitized = input
+        sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
         sanitized = replacingRegex(
             in: sanitized,
             pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
             with: " $1"
         )
-        sanitized = replacingRegex(
-            in: sanitized,
-            pattern: #"(\\[A-Za-z]+)(?=[0-9A-Za-z])"#,
-            with: "$1 "
-        )
         sanitized = replacingDigitPowers(in: sanitized)
         sanitized = closeUnbalancedMathDelimiters(in: sanitized)
         return sanitized
+    }
+
+    private static func insertBoundarySpacesForKnownCommands(in text: String) -> String {
+        var output = text
+        let commands = ["per", "mathrm", "text"]
+
+        for command in commands {
+            output = replacingRegex(
+                in: output,
+                pattern: #"(?<!\s)(\\"# + command + #")"#,
+                with: " $1"
+            )
+            output = replacingRegex(
+                in: output,
+                pattern: #"(\\"# + command + #")(?=[A-Za-z0-9])"#,
+                with: "$1 "
+            )
+        }
+
+        return output
     }
 
     private static func replacingDigitPowers(in text: String) -> String {

@@ -1046,6 +1046,7 @@ struct SearchView: View {
 private enum ModelOutputLaTeXSanitizer {
     static func sanitize(_ input: String) -> String {
         var sanitized = input
+        sanitized = insertBoundarySpacesForKnownCommands(in: sanitized)
         sanitized = replacingRegex(
             in: sanitized,
             pattern: #"(?<!\s)(\\[A-Za-z]+)"#,
@@ -1053,6 +1054,26 @@ private enum ModelOutputLaTeXSanitizer {
         )
         sanitized = replacingDigitPowers(in: sanitized)
         return sanitized
+    }
+
+    private static func insertBoundarySpacesForKnownCommands(in text: String) -> String {
+        var output = text
+        let commands = ["per", "mathrm", "text"]
+
+        for command in commands {
+            output = replacingRegex(
+                in: output,
+                pattern: #"(?<!\s)(\\"# + command + #")"#,
+                with: " $1"
+            )
+            output = replacingRegex(
+                in: output,
+                pattern: #"(\\"# + command + #")(?=[A-Za-z0-9])"#,
+                with: "$1 "
+            )
+        }
+
+        return output
     }
 
     private static func replacingDigitPowers(in text: String) -> String {
