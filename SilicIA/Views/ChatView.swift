@@ -240,8 +240,8 @@ struct ChatView: View {
 
                 Text(
                     settings.language == .french
-                    ? "Sortie max estimée : ~\(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
-                    : "Estimated max output: ~\(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
+                    ? "Sortie max estimée : ~ \(estimatedMaxOutputCharacters) caractères (~\(estimatedMaxOutputSentences) phrases)"
+                    : "Estimated max output: ~ \(estimatedMaxOutputCharacters) characters (~\(estimatedMaxOutputSentences) sentences)"
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -263,8 +263,8 @@ struct ChatView: View {
 
                 Text(
                     settings.language == .french
-                    ? "Contexte estimé : ~\(estimatedMaxContextWords) mots"
-                    : "Estimated context: ~\(estimatedMaxContextWords) words"
+                    ? "Contexte estimé : ~ \(estimatedMaxContextWords) mots"
+                    : "Estimated context: ~ \(estimatedMaxContextWords) words"
                 )
                 .font(.caption)
                 .foregroundColor(.secondary)

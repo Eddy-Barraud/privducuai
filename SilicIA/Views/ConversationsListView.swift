@@ -22,9 +22,13 @@ struct ConversationsListView: View {
         VStack(spacing: 0) {
             HStack {
                 Button(action: onDismiss) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 16, weight: .semibold))
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                            .fontWeight(.medium)
+                    }
                 }
+                .buttonStyle(.bordered)
                 .help("Back to chat")
 
                 Text("Chat History")
@@ -34,12 +38,17 @@ struct ConversationsListView: View {
 
                 if !conversations.isEmpty {
                     Button(action: { showClearAllConfirmation = true }) {
-                        Text("Clear all")
-                            .font(.subheadline)
+                        HStack(spacing: 6) {
+                            Image(systemName: "trash")
+                            Text("Clear all")
+                                .fontWeight(.medium)
+                        }
                     }
-                    .foregroundColor(.red)
+                    .buttonStyle(.bordered)
+                    .tint(.red)
                 }
             }
+            .padding()
 #if os(iOS)
             .background(Color(.secondarySystemBackground))
 #elseif os(macOS)
@@ -133,11 +142,15 @@ struct ConversationsListView: View {
                 modelContext.delete(conversation)
                 _ = saveContext()
             }) {
-                Image(systemName: "trash.fill")
-                    .font(.system(size: 14))
-                    .foregroundColor(.secondary)
+                HStack(spacing: 4) {
+                    Image(systemName: "trash")
+                    Text("Delete")
+                        .fontWeight(.medium)
+                }
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
+            .tint(.red)
+            .help("Delete conversation")
             .padding(.leading, 8)
         }
     }
