@@ -18,29 +18,12 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Cache Swift Package Dependencies
-      uses: actions/cache@v4
+    - name: Restore Xcode Cache
+      uses: irgaly/xcode-cache@v1
       with:
-        path: |
-          ~/Library/Developer/Xcode/iOS\ Deployment/
-          ~/Library/Developer/Xcode/Archives/
-          ~/Library/Developer/Xcode/iOS\ Simulator/
-          ~/Library/Developer/Xcode/UserData/CodeSignatures/
-        key: swift-packages-${{ runner.os }}-${{ hashFiles('**/Package.resolved') }}
+        key: xcode-cache-${{ runner.os }}-${{ github.ref_name }}-${{ github.sha }}
         restore-keys: |
-          swift-packages-${{ runner.os }}-
-    
-    - name: Cache Derived Data
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/Library/Developer/Xcode/iOS\ Deployment/
-          ~/Library/Developer/Xcode/Archives/
-          ~/Library/Developer/Xcode/iOS\ Simulator/
-          ~/Library/Developer/Xcode/UserData/CodeSignatures/
-        key: derived-data-${{ runner.os }}-${{ github.sha }}
-        restore-keys: |
-          derived-data-${{ runner.os }}-
+          xcode-cache-${{ runner.os }}-${{ github.ref_name }}-
     
     - name: Select Xcode
       run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer

@@ -1,7 +1,11 @@
 name: Check Web Search Sources
 
 on:
-  schedule: daily
+  schedule:
+  # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  # Allow manual trigger for testing
+  workflow_dispatch:
 
 jobs:
   check-websearchservice-sources:
