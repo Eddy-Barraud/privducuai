@@ -1,17 +1,7 @@
 name: Check Web Search Sources
 
 on:
-  workflow_dispatch:
-  push:
-    branches: [ main, develop ]
-    paths:
-      - SilicIA/Services/WebSearchService.swift
-      - .github/workflows/checkwebscrap.yml
-  pull_request:
-    branches: [ main, develop ]
-    paths:
-      - SilicIA/Services/WebSearchService.swift
-      - .github/workflows/checkwebscrap.yml
+  schedule: daily
 
 jobs:
   check-websearchservice-sources:
