@@ -33,7 +33,7 @@ struct ChatView: View {
     @State private var showHistory = false
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
-    @State private var isWebSearchEnabled = false
+    @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -632,7 +632,6 @@ struct ChatView: View {
     private func startNewConversationFromSharedInputs(urls: [String], pdfs: [URL]) {
         preanalysisTask?.cancel()
         messageInput = ""
-        isWebSearchEnabled = false
         chatService.resetConversation()
 
         var newSources: [ContextSource] = urls.map { ContextSource(kind: .url(text: $0)) }
@@ -743,7 +742,6 @@ struct ChatView: View {
         preanalysisTask?.cancel()
         messageInput = ""
         contextSources = [ContextSource(kind: .url(text: ""))]
-        isWebSearchEnabled = false
         sharedURLs.removeAll()
         sharedPDFs.removeAll()
         chatService.resetConversation()

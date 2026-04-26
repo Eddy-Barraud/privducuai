@@ -18,17 +18,29 @@ struct ContentView: View {
         var id: String { rawValue }
     }
 
-    @State private var selectedTab: AppTab = .searchAssist
+    @AppStorage("contentView.selectedTab") private var selectedTabRawValue: String = AppTab.searchAssist.rawValue
     @Environment(\.modelContext) private var modelContext
     @Binding var sharedURLs: [String]
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
 
+    private var selectedTab: AppTab {
+        get { AppTab(rawValue: selectedTabRawValue) ?? .searchAssist }
+        nonmutating set { selectedTabRawValue = newValue.rawValue }
+    }
+
+    private var selectedTabBinding: Binding<AppTab> {
+        Binding(
+            get: { selectedTab },
+            set: { selectedTab = $0 }
+        )
+    }
+
     /// Renders the tab picker and currently selected application screen.
     var body: some View {
         VStack(spacing: 0) {
-            Picker("Application", selection: $selectedTab) {
+            Picker("Application", selection: selectedTabBinding) {
                 Text(AppTab.searchAssist.rawValue).tag(AppTab.searchAssist)
                 Text(AppTab.chat.rawValue).tag(AppTab.chat)
             }
