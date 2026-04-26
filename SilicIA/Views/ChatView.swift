@@ -35,6 +35,13 @@ struct ChatView: View {
     @FocusState private var isInputFieldFocused: Bool
     @State private var copiedMessageID: ChatMessage.ID?
     @AppStorage("chatView.isWebSearchEnabled") private var isWebSearchEnabled = false
+    @State private var loggedAssistantSnapshots: [ChatMessage.ID: String] = [:]
+
+    private func debugLog(_ message: String) {
+        #if DEBUG
+        print("[ChatView] \(message)")
+        #endif
+    }
 
     private var controlBackgroundColor: Color {
         #if os(macOS)
@@ -377,9 +384,7 @@ struct ChatView: View {
     private func renderedMessageContent(_ message: ChatMessage) -> some View {
         if message.role == .assistant {
             VStack(alignment: .leading, spacing: 8) {
-                LaTeX(ModelOutputLaTeXSanitizer.sanitize(message.content))
-                    .font(.body)
-                    .foregroundColor(colorScheme == .dark ? .white : .black)
+                progressiveLaTeXText(message.content, isStreaming: isStreamingAssistantMessage(message))
 
                 if let citations = message.citations,
                    !citations.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -401,9 +406,68 @@ struct ChatView: View {
                     }
                 }
             }
+            .onAppear {
+                logAssistantContentIfNeeded(messageID: message.id, content: message.content)
+            }
+            .onChange(of: message.content) {
+                logAssistantContentIfNeeded(messageID: message.id, content: message.content)
+            }
         } else {
             Text(message.content)
         }
+    }
+
+    private func logAssistantContentIfNeeded(messageID: ChatMessage.ID, content: String) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard loggedAssistantSnapshots[messageID] != content else { return }
+        loggedAssistantSnapshots[messageID] = content
+        debugLog("Model answer (pre-LaTeX): \(content)")
+    }
+
+    private func isStreamingAssistantMessage(_ message: ChatMessage) -> Bool {
+        guard chatService.isResponding, message.role == .assistant else { return false }
+        return chatService.messages.last?.id == message.id
+    }
+
+    @ViewBuilder
+    private func progressiveLaTeXText(_ text: String, isStreaming: Bool) -> some View {
+        let sanitized = ModelOutputLaTeXSanitizer.sanitize(text)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if isStreaming {
+            let lines = sanitized.components(separatedBy: .newlines)
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(lines.enumerated()), id: \.offset) { lineNB, line in
+                    if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Color.clear.frame(height: 8)
+                    }
+                    if lineNB <= 6 {
+                        LaTeX(line)
+                            .font(.body)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        } else {
+            let reconstructed = sanitized.components(separatedBy: .newlines).joined(separator: "\n")
+            let finalText = normalizedLaTeXComparisonText(reconstructed) == normalizedLaTeXComparisonText(sanitized)
+                ? sanitized
+                : reconstructed
+            
+            LaTeX(finalText)
+                .font(.body)
+                .foregroundColor(colorScheme == .dark ? .white : .black)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func normalizedLaTeXComparisonText(_ text: String) -> String {
+        text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Renders input area and send action.

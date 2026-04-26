@@ -147,6 +147,7 @@ final class ChatService: ObservableObject {
             : cappedSelectedContext
         debugContext("sendMessage selectedContextChars=\(selected.selectedContext.count) cappedContextChars=\(finalSelectedContext.count) contextTokenCap=\(contextTokenCap) topChunkCount=\(selected.topChunks.count)")
 
+        var streamingAssistantID: UUID?
         do {
             let instructions = buildInstructions(for: language)
             let session = LanguageModelSession(instructions: instructions)
@@ -159,14 +160,40 @@ final class ChatService: ObservableObject {
                 maxOutputTokens: effectiveMaxOutputTokens
             )
             let options = GenerationOptions(temperature: temperature, maximumResponseTokens: effectiveMaxOutputTokens)
-            let response = try await session.respond(to: prompt, options: options)
-            let content = normalizeModelOutput(String(describing: response.content))
             let citations = RAGCitationFormatter.citationBlock(from: selected.topChunks, language: language)
-            messages.append(ChatMessage(role: .assistant, content: content, citations: citations))
-            persistMessage(role: "assistant", content: content, citations: citations)
+
+            let assistantID = UUID()
+            streamingAssistantID = assistantID
+            messages.append(ChatMessage(id: assistantID, role: .assistant, content: "", citations: citations))
+
+            var latestPartial = ""
+            let responseStream = session.streamResponse(to: prompt, options: options)
+            for try await snapshot in responseStream {
+                let partial = normalizeModelOutput(String(describing: snapshot.content))
+                guard !partial.isEmpty, partial != latestPartial else { continue }
+                latestPartial = partial
+                updateAssistantMessage(id: assistantID, content: partial, citations: citations)
+            }
+
+            let finalContent: String
+            if latestPartial.isEmpty {
+                let response = try await session.respond(to: prompt, options: options)
+                finalContent = normalizeModelOutput(String(describing: response.content))
+                updateAssistantMessage(id: assistantID, content: finalContent, citations: citations)
+            } else {
+                finalContent = latestPartial
+            }
+
+            persistMessage(role: "assistant", content: finalContent, citations: citations)
         } catch {
             let fallback = "I couldn't generate a response with the foundation model right now. Please try again."
-            messages.append(ChatMessage(role: .assistant, content: fallback))
+            if let streamingAssistantID,
+               let index = messages.firstIndex(where: { $0.id == streamingAssistantID }) {
+                messages[index].content = fallback
+                messages[index].citations = nil
+            } else {
+                messages.append(ChatMessage(role: .assistant, content: fallback))
+            }
             persistMessage(role: "assistant", content: fallback, citations: nil)
             errorMessage = error.localizedDescription
         }
@@ -707,6 +734,12 @@ final class ChatService: ObservableObject {
         return normalized.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private func updateAssistantMessage(id: UUID, content: String, citations: String?) {
+        guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        messages[index].content = content
+        messages[index].citations = citations
+    }
+
     /// Builds dynamic chat instructions matching the user's query language.
     private func buildInstructions(for language: ModelLanguage) -> String {
         return PromptLoader.loadPrompt(mode: "normal", feature: "chat", variant: "instructions", language: language)
@@ -896,12 +929,13 @@ struct ChatMessage: Identifiable {
         case assistant
     }
 
-    let id = UUID()
+    let id: UUID
     let role: Role
-    let content: String
-    let citations: String?
+    var content: String
+    var citations: String?
 
-    init(role: Role, content: String, citations: String? = nil) {
+    init(id: UUID = UUID(), role: Role, content: String, citations: String? = nil) {
+        self.id = id
         self.role = role
         self.content = content
         self.citations = citations
