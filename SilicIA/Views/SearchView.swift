@@ -26,7 +26,7 @@ struct SearchView: View {
     let chatService: ChatService
     let onOfflineQuery: ((String) -> Void)?
 
-    @StateObject private var searchService = DuckDuckGoService()
+    @StateObject private var searchService = WebSearchService()
     @StateObject private var aiService = AIService()
     @StateObject private var speechRecognitionService = SpeechRecognitionService()
 
@@ -483,7 +483,7 @@ struct SearchView: View {
             VStack(spacing: 16) {
                 ProgressView()
                     .scaleEffect(1.5)
-                Text(settings.language == .french ? "Recherche sur DuckDuckGo..." : "Searching DuckDuckGo...")
+                Text(settings.language == .french ? "Recherche web (DuckDuckGo + Wikipedia)..." : "Searching the web (DuckDuckGo + Wikipedia)...")
                     .foregroundColor(.secondary)
 
                 if !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
@@ -788,10 +788,15 @@ struct SearchView: View {
                     fetchedResults = try await searchService.search(
                         queries: [trimmedQuery] + derivedQueries,
                         maxResultsPerQuery: searchLimit,
-                        mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount
+                        mergedLimit: searchLimit * Self.deepSearchDerivedQueryCount,
+                        language: settings.language
                     )
                 } else {
-                    fetchedResults = try await searchService.search(query: trimmedQuery, maxResults: searchLimit)
+                    fetchedResults = try await searchService.search(
+                        query: trimmedQuery,
+                        maxResults: searchLimit,
+                        language: settings.language
+                    )
                 }
 
                 guard activeSearchRequestID == requestID else { return }

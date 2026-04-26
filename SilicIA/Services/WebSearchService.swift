@@ -1,5 +1,5 @@
 //
-//  DuckDuckGoService.swift
+//  WebSearchService.swift
 //  SilicIA
 //
 //  Created by Claude on 23/03/2026.
@@ -13,7 +13,6 @@ import UIKit
 
 /// Strip HTML tags and decode common HTML entities from a raw HTML string.
 private func htmlToPlainText(_ html: String) -> String {
-    // Remove all HTML tags
     var result = html
     if let regex = try? NSRegularExpression(pattern: "<[^>]+>", options: []) {
         result = regex.stringByReplacingMatches(
@@ -22,26 +21,26 @@ private func htmlToPlainText(_ html: String) -> String {
             withTemplate: ""
         )
     }
-    // Decode HTML entities
+
     let entities: [(String, String)] = [
-        ("&amp;",  "&"),
-        ("&lt;",   "<"),
-        ("&gt;",   ">"),
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
         ("&quot;", "\""),
         ("&#x27;", "'"),
-        ("&#39;",  "'"),
+        ("&#39;", "'"),
         ("&apos;", "'"),
         ("&nbsp;", " "),
-        ("&mdash;", "—"),
-        ("&ndash;", "–"),
-        ("&hellip;", "…"),
-        ("&laquo;", "«"),
-        ("&raquo;", "»"),
+        ("&mdash;", "-"),
+        ("&ndash;", "-"),
+        ("&hellip;", "..."),
+        ("&laquo;", "\""),
+        ("&raquo;", "\"")
     ]
     for (entity, char) in entities {
         result = result.replacingOccurrences(of: entity, with: char)
     }
-    // Decode numeric decimal entities like &#8230;
+
     if let numericRegex = try? NSRegularExpression(pattern: "&#(\\d+);", options: []) {
         let matches = numericRegex.matches(
             in: result,
@@ -50,12 +49,13 @@ private func htmlToPlainText(_ html: String) -> String {
         for match in matches {
             if let range = Range(match.range(at: 1), in: result),
                let codePoint = Int(result[range]),
-               let scalar = Unicode.Scalar(codePoint) {
-                let fullRange = Range(match.range, in: result)!
+               let scalar = Unicode.Scalar(codePoint),
+               let fullRange = Range(match.range, in: result) {
                 result = result.replacingCharacters(in: fullRange, with: String(scalar))
             }
         }
     }
+
     return result.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
@@ -77,15 +77,14 @@ private func extractInnerHTML(in html: String, className: String, tagName: Strin
 }
 
 @MainActor
-/// Performs DuckDuckGo HTML search and parses result cards.
-class DuckDuckGoService: ObservableObject {
+/// Performs multi-provider web search and merges DuckDuckGo with Wikipedia REST results.
+class WebSearchService: ObservableObject {
     @Published var isSearching = false
     @Published var error: Error?
 
-    /// App-specific User-Agent identifying SilicIA. Update version/contact as needed.
-    /// Format recommendation: AppName/Version (Platform; Device) Engine; +ContactURL
+    private static let wikipediaSearchLimit = 2
+
     private static let userAgent: String = {
-        // You can optionally make these dynamic using Bundle info and UIDevice.
         let appName = "SilicIA"
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
         #if os(iOS)
@@ -116,23 +115,32 @@ class DuckDuckGoService: ObservableObject {
             return "Device"
             #endif
         }()
-        // Include WebKit engine hint and a contact URL per good scraping etiquette
         let engine = "AppleWebKit/605.1.15"
         let contact = "+https://github.com/Eddy-Barraud/SilicIA/discussions"
         return "\(appName)/\(appVersion) (\(platform); \(device)) \(engine); \(contact)"
+    }()
+
+    private static let wikipediaPagePathAllowed: CharacterSet = {
+        var allowed = CharacterSet.urlPathAllowed
+        allowed.remove(charactersIn: "/")
+        return allowed
+    }()
+
+    private static let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        return decoder
     }()
 
     private let session: URLSession
 
     private func debugLog(_ message: String) {
         #if DEBUG
-        print("[DuckDuckGoService] \(message)")
+        print("[WebSearchService] \(message)")
         #endif
     }
 
-    /// Creates a search session configured for efficient DuckDuckGo requests.
     init() {
-        // Configure URLSession for efficient power usage
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.waitsForConnectivity = true
@@ -140,24 +148,29 @@ class DuckDuckGoService: ObservableObject {
         self.session = URLSession(configuration: config)
     }
 
-    /// Search DuckDuckGo using their HTML API
-    func search(query: String, maxResults: Int = 10) async throws -> [SearchResult] {
+    /// Search DuckDuckGo and Wikipedia, then merge deduplicated results.
+    func search(query: String, maxResults: Int = 10, language: ModelLanguage = .english) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
-        debugLog("single-query search start: query=\(query), limit=\(maxResults)")
+        debugLog("single-query search start: query=\(query), limit=\(maxResults), language=\(language.rawValue)")
 
         isSearching = true
         defer { isSearching = false }
 
-        let results = try await executeSearch(query: query, maxResults: maxResults)
+        let results = try await executeSearch(query: query, maxResults: maxResults, language: language)
 
         debugLog("single-query search done: count=\(results.count)")
 
         return results
     }
 
-    /// Executes multiple DuckDuckGo searches and merges deduplicated results.
-    func search(queries: [String], maxResultsPerQuery: Int = 10, mergedLimit: Int = 10) async throws -> [SearchResult] {
+    /// Executes multiple searches and interleaves deduplicated results across queries.
+    func search(
+        queries: [String],
+        maxResultsPerQuery: Int = 10,
+        mergedLimit: Int = 10,
+        language: ModelLanguage = .english
+    ) async throws -> [SearchResult] {
         let normalizedQueries = queries
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -180,15 +193,16 @@ class DuckDuckGoService: ObservableObject {
         }
 
         debugLog(
-            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), perQueryLimit=\(maxResultsPerQuery), mergedLimit=\(mergedLimit)"
+            "multi-query search start: input=\(normalizedQueries.count), unique=\(uniqueQueries.count), perQueryLimit=\(maxResultsPerQuery), mergedLimit=\(mergedLimit), language=\(language.rawValue)"
         )
 
         var perQueryResults: [[SearchResult]] = []
         perQueryResults.reserveCapacity(uniqueQueries.count)
         var failedQueries = 0
+
         for query in uniqueQueries {
             do {
-                let results = try await executeSearch(query: query, maxResults: maxResultsPerQuery)
+                let results = try await executeSearch(query: query, maxResults: maxResultsPerQuery, language: language)
                 perQueryResults.append(results)
                 debugLog("query ok: \(query) => \(results.count) results")
             } catch {
@@ -202,10 +216,7 @@ class DuckDuckGoService: ObservableObject {
             throw SearchError.networkError
         }
 
-        let merged = mergeInterleavedDeduplicatedResults(
-            perQueryResults,
-            mergedLimit: mergedLimit
-        )
+        let merged = mergeInterleavedDeduplicatedResults(perQueryResults, mergedLimit: mergedLimit)
 
         debugLog(
             "multi-query search done: merged=\(merged.count), failures=\(failedQueries)/\(uniqueQueries.count)"
@@ -214,11 +225,56 @@ class DuckDuckGoService: ObservableObject {
         return merged
     }
 
-    /// Shared single-query implementation used by both public search entrypoints.
-    private func executeSearch(query: String, maxResults: Int) async throws -> [SearchResult] {
+    /// Runs both providers for one query and merges deduplicated results.
+    private func executeSearch(query: String, maxResults: Int, language: ModelLanguage) async throws -> [SearchResult] {
         guard !query.isEmpty else { return [] }
 
-        // Use DuckDuckGo HTML search (more efficient than scraping)
+        async let duckDuckGoOutcome: ([SearchResult], Error?) = {
+            do {
+                let results = try await executeDuckDuckGoSearch(query: query, maxResults: maxResults)
+                return (results, nil)
+            } catch {
+                return ([], error)
+            }
+        }()
+
+        async let wikipediaOutcome: ([SearchResult], Error?) = {
+            do {
+                let results = try await executeWikipediaSearch(
+                    query: query,
+                    language: language,
+                    limit: Self.wikipediaSearchLimit
+                )
+                return (results, nil)
+            } catch {
+                return ([], error)
+            }
+        }()
+
+        let (duckDuckGoResults, duckDuckGoError) = await duckDuckGoOutcome
+        let (wikipediaResults, wikipediaError) = await wikipediaOutcome
+
+        if let duckDuckGoError {
+            debugLog("DuckDuckGo search failed for query=\(query): \(duckDuckGoError.localizedDescription)")
+        }
+        if let wikipediaError {
+            debugLog("Wikipedia search failed for query=\(query): \(wikipediaError.localizedDescription)")
+        }
+
+        let mergedProviders = mergeInterleavedDeduplicatedResults(
+            [duckDuckGoResults, wikipediaResults],
+            mergedLimit: maxResults+Self.wikipediaSearchLimit
+        )
+
+        if mergedProviders.isEmpty {
+            throw SearchError.networkError
+        }
+
+        return mergedProviders
+    }
+
+    /// Executes DuckDuckGo HTML search.
+    private func executeDuckDuckGoSearch(query: String, maxResults: Int) async throws -> [SearchResult] {
         let encodedQuery = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
         let urlString = "https://html.duckduckgo.com/html/?q=\(encodedQuery)"
 
@@ -236,9 +292,106 @@ class DuckDuckGoService: ObservableObject {
             throw SearchError.invalidResponse
         }
 
-        // Parse HTML results
-        let results = try parseHTMLResults(from: data, query: query)
-        return Array(results.prefix(maxResults)) // Limit to user-configured max results
+        let results = try parseDuckDuckGoHTMLResults(from: data)
+        return Array(results.prefix(maxResults))
+    }
+
+    /// Executes Wikipedia REST search and enriches each page with full source content.
+    private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
+        guard let searchURL = wikipediaSearchURL(query: query, language: language, limit: limit) else {
+            throw SearchError.invalidURL
+        }
+
+        var request = URLRequest(url: searchURL)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+
+        let (data, response) = try await session.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw SearchError.invalidResponse
+        }
+
+        let decoded = try Self.jsonDecoder.decode(WikipediaSearchResponse.self, from: data)
+        let pages = Array(decoded.pages.prefix(max(limit, 0)))
+        guard !pages.isEmpty else { return [] }
+
+        let detailsByKey = await fetchWikipediaPageDetailsByKey(
+            keys: pages.map(\.key),
+            language: language
+        )
+
+        return pages.compactMap { page in
+            let details = detailsByKey[page.key]
+            let title = page.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let snippetCandidate = htmlToPlainText(page.excerpt ?? page.description ?? "")
+            let snippet = snippetCandidate.isEmpty ? "Wikipedia page" : snippetCandidate
+            let pageURL = details?.contentUrls?.desktop?.page?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? details?.htmlUrl?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? wikipediaReadablePageURL(for: page.key, language: language)
+            let retrievedContent = details?.source?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !pageURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+            return SearchResult(
+                title: title.isEmpty ? page.key.replacingOccurrences(of: "_", with: " ") : title,
+                url: pageURL,
+                snippet: snippet,
+                retrievedContent: retrievedContent?.isEmpty == true ? nil : retrievedContent
+            )
+        }
+    }
+
+    /// Fetches Wikipedia page details (including full source text) for each page key.
+    private func fetchWikipediaPageDetailsByKey(keys: [String], language: ModelLanguage) async -> [String: WikipediaPageResponse] {
+        var uniqueKeys: [String] = []
+        var seenKeys = Set<String>()
+        for key in keys where !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if seenKeys.insert(key).inserted {
+                uniqueKeys.append(key)
+            }
+        }
+
+        guard !uniqueKeys.isEmpty else { return [:] }
+
+        var detailsByKey: [String: WikipediaPageResponse] = [:]
+        await withTaskGroup(of: (String, WikipediaPageResponse?).self) { group in
+            for key in uniqueKeys {
+                group.addTask {
+                    let page = await self.fetchWikipediaPageDetails(for: key, language: language)
+                    return (key, page)
+                }
+            }
+
+            for await (key, page) in group {
+                if let page {
+                    detailsByKey[key] = page
+                }
+            }
+        }
+
+        return detailsByKey
+    }
+
+    /// Calls /w/rest.php/v1/page/[key] and decodes full page source content.
+    private func fetchWikipediaPageDetails(for key: String, language: ModelLanguage) async -> WikipediaPageResponse? {
+        guard let pageURL = wikipediaPageEndpointURL(key: key, language: language) else {
+            return nil
+        }
+
+        do {
+            var request = URLRequest(url: pageURL)
+            request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+            let (data, response) = try await session.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  httpResponse.statusCode == 200 else {
+                return nil
+            }
+            return try Self.jsonDecoder.decode(WikipediaPageResponse.self, from: data)
+        } catch {
+            debugLog("Wikipedia page fetch failed for key=\(key): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Interleaves result lists, removing duplicate URLs, up to the provided limit.
@@ -306,43 +459,35 @@ class DuckDuckGoService: ObservableObject {
         return "\(scheme)://\(host)\(path)\(query)"
     }
 
-    /// Parse DuckDuckGo HTML response
-    private func parseHTMLResults(from data: Data, query: String) throws -> [SearchResult] {
+    /// Parse DuckDuckGo HTML response.
+    private func parseDuckDuckGoHTMLResults(from data: Data) throws -> [SearchResult] {
         guard let html = String(data: data, encoding: .utf8) else {
             throw SearchError.parsingFailed
         }
 
         var results: [SearchResult] = []
-
-        // Simple HTML parsing - look for result blocks
-        // DuckDuckGo HTML structure: results are in divs with class "result"
         let components = html.components(separatedBy: "class=\"result__a\"")
 
-        for i in 1..<min(components.count, 11) {
+        for i in 1..<min(components.count, 21) {
             let component = components[i]
 
-            // Extract URL
             guard let hrefRange = component.range(of: "href=\""),
                   let hrefEndRange = component.range(of: "\"", range: hrefRange.upperBound..<component.endIndex) else {
                 continue
             }
             let url = String(component[hrefRange.upperBound..<hrefEndRange.lowerBound])
 
-            // Extract title
             guard let titleStart = component.range(of: ">"),
                   let titleEnd = component.range(of: "</a>", range: titleStart.upperBound..<component.endIndex) else {
                 continue
             }
             let title = htmlToPlainText(String(component[titleStart.upperBound..<titleEnd.lowerBound]))
 
-            // Extract snippet. The snippet may include nested tags (<b>, <span>, etc.);
-            // capture the full element content instead of stopping at the first closing tag.
             let snippetHTML = extractInnerHTML(in: component, className: "result__snippet", tagName: "a")
                 ?? extractInnerHTML(in: component, className: "result__snippet", tagName: "div")
                 ?? ""
             let snippet = htmlToPlainText(snippetHTML)
 
-            // Clean up URL (DuckDuckGo redirects)
             let cleanURL = url.hasPrefix("//duckduckgo.com/l/?") ? extractActualURL(from: url) : url
 
             results.append(SearchResult(
@@ -355,7 +500,7 @@ class DuckDuckGoService: ObservableObject {
         return results
     }
 
-    /// Extract actual URL from DuckDuckGo redirect
+    /// Extract actual URL from DuckDuckGo redirect.
     private func extractActualURL(from ddgURL: String) -> String {
         guard let uddParam = ddgURL.components(separatedBy: "uddg=").last,
               let actualURL = uddParam.components(separatedBy: "&").first,
@@ -364,6 +509,66 @@ class DuckDuckGoService: ObservableObject {
         }
         return decoded
     }
+
+    private func wikipediaSearchURL(query: String, language: ModelLanguage, limit: Int) -> URL? {
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = wikipediaHost(for: language)
+        components.path = "/w/rest.php/v1/search/page"
+        components.queryItems = [
+            URLQueryItem(name: "q", value: query),
+            URLQueryItem(name: "limit", value: "\(max(1, limit))")
+        ]
+        return components.url
+    }
+
+    private func wikipediaPageEndpointURL(key: String, language: ModelLanguage) -> URL? {
+        guard let encodedKey = key.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) else {
+            return nil
+        }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = wikipediaHost(for: language)
+        components.path = "/w/rest.php/v1/page/\(encodedKey)"
+        return components.url
+    }
+
+    private func wikipediaReadablePageURL(for key: String, language: ModelLanguage) -> String {
+        let encodedKey = key.addingPercentEncoding(withAllowedCharacters: Self.wikipediaPagePathAllowed) ?? key
+        return "https://\(wikipediaHost(for: language))/wiki/\(encodedKey)"
+    }
+
+    private func wikipediaHost(for language: ModelLanguage) -> String {
+        language == .french ? "fr.wikipedia.org" : "en.wikipedia.org"
+    }
+}
+
+private struct WikipediaSearchResponse: Decodable {
+    let pages: [WikipediaSearchPage]
+}
+
+private struct WikipediaSearchPage: Decodable {
+    let key: String
+    let title: String
+    let excerpt: String?
+    let description: String?
+}
+
+private struct WikipediaPageResponse: Decodable {
+    struct ContentURLs: Decodable {
+        struct Desktop: Decodable {
+            let page: String?
+        }
+
+        let desktop: Desktop?
+    }
+
+    let key: String
+    let title: String?
+    let source: String?
+    let contentUrls: ContentURLs?
+    let htmlUrl: String?
 }
 
 /// Enumerates high-level search failure categories.

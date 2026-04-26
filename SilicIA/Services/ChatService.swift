@@ -28,7 +28,7 @@ final class ChatService: ObservableObject {
     @Published var contextAnalysisProgress = 0.0
 
     private let webScraper = WebScrapingService()
-    private let webSearchService = DuckDuckGoService()
+    private let webSearchService = WebSearchService()
     private let ragChunker = RAGChunker()
     private let ragContextService = RAGContextService()
 
@@ -100,6 +100,7 @@ final class ChatService: ObservableObject {
                 pdfURLs: pdfURLs,
                 includeWebSearch: includeWebSearch,
                 currentMessage: message,
+                language: language,
                 maxContextTokens: effectiveMaxContextTokens
             )
             preAnalyzedContextKey = contextKey
@@ -238,6 +239,7 @@ final class ChatService: ObservableObject {
         pdfURLs: [URL],
         includeWebSearch: Bool,
         currentMessage: String = "",
+        language: ModelLanguage = .english,
         maxContextTokens: Int,
         reportProgress: Bool = false
     ) async -> [RAGChunk] {
@@ -254,20 +256,55 @@ final class ChatService: ObservableObject {
         }
 
         let contextURLs = extractURLs(from: contextInput)
-        var discoveredURLs: [String] = []
-        // DuckDuckGo discovery is send-time only because it needs the current user query.
+        var discoveredResults: [SearchResult] = []
+        // Web discovery is send-time only because it needs the current user query.
         if includeWebSearch && !currentMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let searchQuery = buildWebSearchQuery(
                 currentMessage: currentMessage,
                 contextInput: contextInput
             )
-            discoveredURLs = await discoverWebURLs(for: searchQuery)
+            discoveredResults = await discoverWebResults(for: searchQuery, language: language)
         }
+
+        var retrievedWebResults: [SearchResult] = []
+        var retrievedResultURLKeys = Set<String>()
+        for result in discoveredResults {
+            guard let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !retrievedContent.isEmpty else {
+                continue
+            }
+            let urlKey = normalizedURLString(result.url)
+            if retrievedResultURLKeys.insert(urlKey).inserted {
+                retrievedWebResults.append(result)
+            }
+        }
+
+        let discoveredURLs = discoveredResults.map(\.url)
         let urls = deduplicatedURLs(contextURLs + discoveredURLs)
+            .filter { !retrievedResultURLKeys.contains(normalizedURLString($0)) }
         let uniquePDFs = Array(Set(pdfURLs))
-        let totalWorkItems = max(urls.count + uniquePDFs.count, 1)
+        let totalWorkItems = max(urls.count + uniquePDFs.count + retrievedWebResults.count, 1)
         var completedWorkItems = 0
         let webScrapingCharacters = webScrapingCharacterBudget(forContextTokens: maxContextTokens)
+
+        for result in retrievedWebResults {
+            guard let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !retrievedContent.isEmpty else {
+                continue
+            }
+            let chunked = ragChunker.chunk(
+                text: retrievedContent,
+                source: result.title,
+                maxChunkTokens: Self.webChunkMaxTokens,
+                overlapTokens: Self.webChunkOverlapTokens,
+                url: result.url
+            )
+            chunks.append(contentsOf: chunked)
+            completedWorkItems += 1
+            if reportProgress {
+                contextAnalysisProgress = Double(completedWorkItems) / Double(totalWorkItems)
+            }
+        }
 
         if !urls.isEmpty {
             let scraped = await webScraper.scrapeMultiplePages(
@@ -332,19 +369,31 @@ final class ChatService: ObservableObject {
         return String(combined.prefix(Self.maxWebSearchQueryLength))
     }
 
-    private func discoverWebURLs(for query: String) async -> [String] {
+    private func discoverWebResults(for query: String, language: ModelLanguage) async -> [SearchResult] {
         let trimmedQuery = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedQuery.isEmpty else { return [] }
 
         do {
-            let results = try await webSearchService.search(query: trimmedQuery, maxResults: Self.maxWebContextURLs)
-            let urls = results.map(\.url).filter {
-                guard let scheme = URL(string: $0)?.scheme?.lowercased() else { return false }
-                return scheme == "http" || scheme == "https"
+            let results = try await webSearchService.search(
+                query: trimmedQuery,
+                maxResults: Self.maxWebContextURLs,
+                language: language
+            )
+
+            var deduplicated: [SearchResult] = []
+            var seenURLKeys = Set<String>()
+            for result in results {
+                guard let scheme = URL(string: result.url)?.scheme?.lowercased() else { continue }
+                guard scheme == "http" || scheme == "https" else { continue }
+                let urlKey = normalizedURLString(result.url)
+                if seenURLKeys.insert(urlKey).inserted {
+                    deduplicated.append(result)
+                }
             }
-            return Array(Set(urls))
+
+            return deduplicated
         } catch {
-            debugContext("discoverWebURLs failed for query=\"\(trimmedQuery)\": \(error.localizedDescription)")
+            debugContext("discoverWebResults failed for query=\"\(trimmedQuery)\": \(error.localizedDescription)")
             return []
         }
     }

@@ -13,13 +13,15 @@ struct SearchResult: Identifiable, Codable {
     let title: String
     let url: String
     let snippet: String
+    let retrievedContent: String?
 
     /// Creates a search result with title, URL and snippet metadata.
-    init(id: UUID = UUID(), title: String, url: String, snippet: String) {
+    init(id: UUID = UUID(), title: String, url: String, snippet: String, retrievedContent: String? = nil) {
         self.id = id
         self.title = title
         self.url = url
         self.snippet = snippet
+        self.retrievedContent = retrievedContent
     }
 }
 

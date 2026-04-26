@@ -186,13 +186,18 @@ class AIService: ObservableObject {
             ? min(maxScrapingChars, Self.fastSummaryScrapingCharacterCap)
             : maxScrapingChars
 
-        // Scrape content from top pages
-        let urls = results.map { $0.url }
+        // Scrape only URLs without provider-supplied full content.
+        let urlsToScrape = results.compactMap { result -> String? in
+            guard result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false else {
+                return nil
+            }
+            return result.url
+        }
         let scrapedContent: [String: String]
         #if DEBUG
         let scrapeStart = Date()
         scrapedContent = await webScraper.scrapeMultiplePages(
-            urls: urls,
+            urls: urlsToScrape,
             limit: effectiveScrapingResults,
             maxCharacters: effectiveScrapingChars
         )
@@ -213,7 +218,7 @@ class AIService: ObservableObject {
         }
         #else
         scrapedContent = await webScraper.scrapeMultiplePages(
-            urls: urls,
+            urls: urlsToScrape,
             limit: effectiveScrapingResults,
             maxCharacters: effectiveScrapingChars
         )
@@ -225,7 +230,17 @@ class AIService: ObservableObject {
         let contextPrepStart = Date()
         #endif
         for result in results {
-            if let pageContent = scrapedContent[result.url] {
+            if let retrievedContent = result.retrievedContent?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !retrievedContent.isEmpty {
+                let chunked = ragChunker.chunk(
+                    text: retrievedContent,
+                    source: result.title,
+                    maxChunkTokens: Self.webChunkMaxTokens,
+                    overlapTokens: Self.webChunkOverlapTokens,
+                    url: result.url
+                )
+                chunks.append(contentsOf: chunked)
+            } else if let pageContent = scrapedContent[result.url] {
                 let chunked = ragChunker.chunk(
                     text: pageContent,
                     source: result.title,
