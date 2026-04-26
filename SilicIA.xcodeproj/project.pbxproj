@@ -418,7 +418,7 @@
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -432,8 +432,6 @@
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.SilicIA;\n        CFBundleURLSchemes = (\n            SilicIA,\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilicIA uses the microphone for voice search.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "SilicIA converts your speech into search text.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -481,7 +479,7 @@
 				ENABLE_INCOMING_NETWORK_CONNECTIONS = NO;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO;
 				ENABLE_PREVIEWS = YES;
-				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = YES;
+				ENABLE_RESOURCE_ACCESS_AUDIO_INPUT = NO;
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = NO;
 				ENABLE_RESOURCE_ACCESS_CALENDARS = NO;
 				ENABLE_RESOURCE_ACCESS_CAMERA = NO;
@@ -495,8 +493,6 @@
 				"INFOPLIST_KEY_CFBundleDocumentTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeName = PDF;\n        CFBundleTypeRole = Viewer;\n        LSHandlerRank = Alternate;\n        LSItemContentTypes = (\n            \"com.adobe.pdf\",\n        );\n    },\n)]";
 				"INFOPLIST_KEY_CFBundleURLTypes[sdk=macosx*]" = "[(\n    {\n        CFBundleTypeRole = Editor;\n        CFBundleURLName = fr.trevalim.SilicIA;\n        CFBundleURLSchemes = (\n            SilicIA,\n        );\n    },\n)]";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SilicIA uses the microphone for voice search.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "SilicIA converts your speech into search text.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

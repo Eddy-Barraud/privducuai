@@ -143,6 +143,11 @@ struct SearchView: View {
         }
         .onChange(of: settings) {
             settings.save()
+            if !settings.isFirstGuessEnabled {
+                firstGuessText = ""
+                firstGuessElapsedSeconds = nil
+                isGeneratingFirstGuess = false
+            }
         }
         .onChange(of: initialQuery) {
             consumeInitialQueryIfNeeded()
@@ -333,34 +338,36 @@ struct SearchView: View {
                 .help(settings.language == .french ? "Copier" : "Copy")
                 .disabled(aiService.summary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && firstGuessText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
-                if aiService.isSummarizing || isGeneratingFirstGuess {
+                if aiService.isSummarizing || (settings.isFirstGuessEnabled && isGeneratingFirstGuess) {
                     ProgressView()
                         .scaleEffect(0.8)
                 }
             }
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("First guess")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
+            if settings.isFirstGuessEnabled {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("First guess")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
 
-                if isGeneratingFirstGuess && firstGuessText.isEmpty {
-                    Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
-                        .foregroundColor(.secondary)
-                        .italic()
-                } else if !firstGuessText.isEmpty {
-                    LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
-                        .font(.body)
-                        .foregroundColor(colorScheme == .dark ? .white : .black)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
-                        .foregroundColor(.secondary)
-                        .italic()
+                    if isGeneratingFirstGuess && firstGuessText.isEmpty {
+                        Text(settings.language == .french ? "Intuition rapide en cours..." : "Generating quick intuition...")
+                            .foregroundColor(.secondary)
+                            .italic()
+                    } else if !firstGuessText.isEmpty {
+                        LaTeX(ModelOutputLaTeXSanitizer.sanitize(firstGuessText))
+                            .font(.body)
+                            .foregroundColor(colorScheme == .dark ? .white : .black)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        Text(settings.language == .french ? "Une intuition rapide sera affichée ici." : "A quick intuition will appear here.")
+                            .foregroundColor(.secondary)
+                            .italic()
+                    }
                 }
-            }
 
-            Divider()
+                Divider()
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Web context answer")
@@ -414,7 +421,7 @@ struct SearchView: View {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 3) {
-                        if let elapsed = firstGuessElapsedSeconds {
+                        if settings.isFirstGuessEnabled, let elapsed = firstGuessElapsedSeconds {
                             let label = settings.language == .french
                                 ? String(format: "Première réponse en: %.1f s", elapsed)
                                 : String(format: "Time to first answer: %.1f s", elapsed)
@@ -450,7 +457,7 @@ struct SearchView: View {
                 Text(settings.language == .french ? "Recherche web (DuckDuckGo + Wikipedia)..." : "Searching the web (DuckDuckGo + Wikipedia)...")
                     .foregroundColor(.secondary)
 
-                if !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
+                if settings.isFirstGuessEnabled && !isNoAIMode && (isGeneratingFirstGuess || !firstGuessText.isEmpty) {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("First guess")
                             .font(.subheadline)
@@ -546,6 +553,12 @@ struct SearchView: View {
                         .foregroundColor(.secondary)
                 }
                 Slider(value: $settings.temperature, in: AppSettings.temperatureRange, step: 0.05)
+            }
+
+            // First Guess Toggle
+            Toggle(isOn: $settings.isFirstGuessEnabled) {
+                Text(settings.language == .french ? "Activer la première réponse" : "Enable First Guess")
+                    .font(.subheadline)
             }
 
             // Max Response Tokens
@@ -707,7 +720,7 @@ struct SearchView: View {
         aiService.debugNotes = []
         #endif
 
-        if !noAIOnly {
+        if !noAIOnly && settings.isFirstGuessEnabled {
             isGeneratingFirstGuess = true
             Task {
                 let firstGuessStart = Date()
@@ -717,6 +730,12 @@ struct SearchView: View {
                     maxTokens: min(settings.maxResponseTokens, Self.firstGuessTokenCap)
                 )
                 guard activeSearchRequestID == requestID else { return }
+                guard settings.isFirstGuessEnabled else {
+                    firstGuessText = ""
+                    firstGuessElapsedSeconds = nil
+                    isGeneratingFirstGuess = false
+                    return
+                }
                 firstGuessText = firstGuess
                 #if DEBUG
                 debugLog(firstGuessText)

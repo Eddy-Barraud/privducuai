@@ -19,6 +19,7 @@ struct AppSettings: Codable, Equatable {
     var maxResponseTokens: Int = 1500
     var temperature: Double = 0.7
     var maxContextTokens: Int = 2400
+    var isFirstGuessEnabled: Bool = true
     var language: ModelLanguage = .english
 
     private static let storageKey = "SilicIA.AppSettings"
@@ -29,6 +30,7 @@ struct AppSettings: Codable, Equatable {
         case maxResponseTokens
         case temperature
         case maxContextTokens
+        case isFirstGuessEnabled
         case language
     }
 
@@ -61,6 +63,8 @@ struct AppSettings: Codable, Equatable {
             ?? Self.defaultSettings.maxResponseTokens
         temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
             ?? Self.defaultSettings.temperature
+        isFirstGuessEnabled = try container.decodeIfPresent(Bool.self, forKey: .isFirstGuessEnabled)
+            ?? Self.defaultSettings.isFirstGuessEnabled
         language = try container.decodeIfPresent(ModelLanguage.self, forKey: .language)
             ?? Self.defaultSettings.language
 
@@ -82,6 +86,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(maxResponseTokens, forKey: .maxResponseTokens)
         try container.encode(temperature, forKey: .temperature)
         try container.encode(maxContextTokens, forKey: .maxContextTokens)
+        try container.encode(isFirstGuessEnabled, forKey: .isFirstGuessEnabled)
         try container.encode(language, forKey: .language)
     }
 
