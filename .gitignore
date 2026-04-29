@@ -13,6 +13,9 @@ build/
 # macOS
 .DS_Store
 
+# Visual Studio Code
+.vscode/
+
 # Local signing override (do not commit your personal team/profile)
 Configs/LocalSigning.xcconfig
 
