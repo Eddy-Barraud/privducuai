@@ -24,6 +24,8 @@ struct ContentView: View {
     @Binding var sharedPDFs: [URL]
     @Binding var pendingSearchQuery: String?
     @StateObject private var chatService = ChatService()
+    @State private var hasCheckedFoundationModels = false
+    @State private var showFoundationModelsWarning = false
 
     private var selectedTab: AppTab {
         get { AppTab(rawValue: selectedTabRawValue) ?? .searchAssist }
@@ -98,6 +100,19 @@ struct ContentView: View {
             if pendingSearchQuery != nil {
                 selectedTab = .searchAssist
             }
+        }
+        .task {
+            guard !hasCheckedFoundationModels else { return }
+            hasCheckedFoundationModels = true
+            let available = await FoundationModelsAvailability.isAvailable()
+            if !available {
+                showFoundationModelsWarning = true
+            }
+        }
+        .alert(FoundationModelsAvailability.warningTitle(), isPresented: $showFoundationModelsWarning) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(FoundationModelsAvailability.warningMessage())
         }
     }
 }
