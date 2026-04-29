@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
+
+  <title>SilicIA — Privacy‑focused web search assistant for macOS</title>
+  <meta name="description" content="SilicIA is a fast, efficient, privacy-focused web search assistant for macOS powered by DuckDuckGo and Apple on-device AI frameworks." />
+
+  <meta property="og:title" content="SilicIA" />
+  <meta property="og:description" content="A fast, efficient, privacy-focused web search assistant for macOS." />
+  <meta property="og:type" content="website" />
+  <meta property="og:image" content="Screenshots/Factorial.png" />
+
+  <style>
+    :root {
+      --bg: #0b0c0f;
+      --bg-elev: rgba(255, 255, 255, 0.06);
+      --fg: rgba(255, 255, 255, 0.92);
+      --muted: rgba(255, 255, 255, 0.68);
+      --border: rgba(255, 255, 255, 0.12);
+      --accent: #7dd3fc;
+      --accent-2: #a78bfa;
+      --good: #34d399;
+      --danger: #fb7185;
+      --shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+
+      --radius-lg: 18px;
+      --radius-md: 14px;
+
+      --max: 1100px;
+    }
+
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #fafafa;
+        --bg-elev: rgba(0, 0, 0, 0.04);
+        --fg: rgba(10, 12, 16, 0.92);
+        --muted: rgba(10, 12, 16, 0.64);
+        --border: rgba(10, 12, 16, 0.12);
+        --accent: #0369a1;
+        --accent-2: #6d28d9;
+        --shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      height: 100%;
+      margin: 0;
+      background: radial-gradient(1200px 700px at 20% 10%, rgba(125, 211, 252, 0.16), transparent 60%),
+                  radial-gradient(1000px 600px at 80% 0%, rgba(167, 139, 250, 0.14), transparent 55%),
+                  var(--bg);
+      color: var(--fg);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      line-height: 1.5;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    a:hover { text-decoration: underline; }
+
+    .wrap {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 28px 18px 56px;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 10px 0 24px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .logo {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: linear-gradient(135deg, rgba(125, 211, 252, 0.35), rgba(167, 139, 250, 0.25));
+      box-shadow: 0 10px 24px rgba(0,0,0,0.18);
+      flex: 0 0 auto;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0.2px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .nav {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--bg-elev) 85%, transparent);
+      border-radius: 999px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .chip strong { color: var(--fg); font-weight: 600; }
+
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 9px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 22%, transparent), color-mix(in oklab, var(--accent-2) 18%, transparent));
+      font-weight: 600;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 26px;
+      align-items: start;
+      padding-top: 12px;
+    }
+
+    @media (max-width: 920px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    .hero {
+      padding: 18px;
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--bg-elev) 95%, transparent);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow);
+    }
+
+    .hero h2 {
+      margin: 6px 0 10px;
+      font-size: 40px;
+      line-height: 1.1;
+      letter-spacing: -0.6px;
+    }
+
+    @media (max-width: 520px) {
+      .hero h2 { font-size: 32px; }
+    }
+
+    .hero p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15.5px;
+    }
+
+    .hero .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      padding-top: 16px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 11px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--fg);
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 32%, transparent), color-mix(in oklab, var(--accent-2) 28%, transparent));
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+
+    section.card {
+      padding: 16px;
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--bg-elev) 92%, transparent);
+      border-radius: var(--radius-lg);
+    }
+
+    section.card h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      letter-spacing: 0.2px;
+    }
+
+    ul {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+    }
+
+    li { margin: 7px 0; }
+
+    .kpi {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    @media (max-width: 520px) {
+      .kpi { grid-template-columns: 1fr; }
+    }
+
+    .kpi .box {
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--bg) 75%, var(--bg-elev));
+      padding: 12px;
+    }
+
+    .kpi .label { color: var(--muted); font-size: 12px; }
+    .kpi .value { font-weight: 700; margin-top: 2px; }
+
+    .shot {
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      background: color-mix(in oklab, var(--bg-elev) 92%, transparent);
+      box-shadow: var(--shadow);
+    }
+
+    .shot img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+    }
+
+    .caption {
+      color: var(--muted);
+      font-size: 12.5px;
+      margin-top: 10px;
+    }
+
+    .footer {
+      margin-top: 30px;
+      padding-top: 18px;
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 13px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .footer a { color: var(--fg); }
+
+    code.inline {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12.5px;
+      padding: 0 6px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: color-mix(in oklab, var(--bg-elev) 75%, transparent);
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="brand" aria-label="SilicIA">
+        <div class="logo" aria-hidden="true"></div>
+        <h1>SilicIA</h1>
+      </div>
+
+      <nav class="nav" aria-label="Primary">
+        <a class="chip" href="https://github.com/Eddy-Barraud/SilicIA" rel="noopener noreferrer" target="_blank">
+          <strong>GitHub</strong><span aria-hidden="true">↗</span>
+        </a>
+        <a class="chip" href="https://github.com/Eddy-Barraud/SilicIA/blob/main/LICENSE" rel="noopener noreferrer" target="_blank">License</a>
+        <a class="chip" href="https://github.com/Eddy-Barraud/SilicIA/blob/main/Privacy.md" rel="noopener noreferrer" target="_blank">Privacy</a>
+        <a class="cta" href="https://github.com/Eddy-Barraud/SilicIA" rel="noopener noreferrer" target="_blank">View repository</a>
+      </nav>
+    </header>
+
+    <main>
+      <div>
+        <div class="hero">
+          <div class="chip" style="margin-bottom: 12px; width: fit-content;">
+            <span aria-hidden="true">🔍</span>
+            <span>Privacy‑focused search assistant for <strong>macOS</strong></span>
+          </div>
+
+          <h2>Fast search. On‑device summaries. No tracking.</h2>
+          <p>
+            SilicIA is a native macOS application that combines DuckDuckGo search with Apple on‑device AI frameworks.
+            It provides a context‑aware experience: scrape web content, analyze PDFs, and rank relevant chunks to answer quickly—without draining your battery.
+          </p>
+
+          <div class="actions">
+            <a class="btn primary" href="#features">Explore features</a>
+            <a class="btn" href="#how">How it works</a>
+            <a class="btn" href="#build">Build</a>
+          </div>
+
+          <div class="kpi" aria-label="Highlights">
+            <div class="box">
+              <div class="label">Search provider</div>
+              <div class="value">DuckDuckGo</div>
+            </div>
+            <div class="box">
+              <div class="label">AI processing</div>
+              <div class="value">On‑device (NaturalLanguage)</div>
+            </div>
+            <div class="box">
+              <div class="label">Performance</div>
+              <div class="value">Optimized for Apple Silicon</div>
+            </div>
+            <div class="box">
+              <div class="label">Storage</div>
+              <div class="value">Local chat history (SwiftData)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid">
+          <section id="features" class="card" aria-labelledby="features-title">
+            <h3 id="features-title">Features</h3>
+            <ul>
+              <li><strong>DuckDuckGo integration</strong> for privacy‑respecting web search.</li>
+              <li><strong>Tabbed experience</strong>: switch between Search Assist and Chat.</li>
+              <li><strong>Concise summaries</strong> with direct links to sources.</li>
+              <li><strong>Context‑aware chat</strong>: attach URL + PDF context (including drag‑and‑drop PDFs) for retrieval‑augmented answers.</li>
+              <li><strong>Chat history</strong>: persistent conversations stored locally with SwiftData.</li>
+              <li><strong>Privacy‑first</strong>: no tracking, no data collection (per project README).</li>
+            </ul>
+          </section>
+
+          <section id="how" class="card" aria-labelledby="how-title">
+            <h3 id="how-title">How it works</h3>
+            <ul>
+              <li><strong>Search</strong>: enter a query.</li>
+              <li><strong>Fetch</strong>: query DuckDuckGo and retrieve top results.</li>
+              <li><strong>Scrape</strong>: extract key page content for deeper context.</li>
+              <li><strong>Summarize</strong>: on‑device processing via Apple’s NaturalLanguage framework.</li>
+              <li><strong>Present</strong>: get a concise answer plus source links.</li>
+            </ul>
+          </section>
+
+          <section class="card" aria-labelledby="tech-title">
+            <h3 id="tech-title">Technical highlights</h3>
+            <ul>
+              <li><strong>SwiftUI</strong> for the native macOS interface.</li>
+              <li><strong>Foundation</strong> networking (URLSession) and caching.</li>
+              <li><strong>NaturalLanguage</strong> for tokenization/tagging and extractive summarization.</li>
+              <li><strong>PDFKit</strong> for PDF parsing and context extraction.</li>
+            </ul>
+          </section>
+
+          <section id="build" class="card" aria-labelledby="build-title">
+            <h3 id="build-title">Requirements & build</h3>
+            <ul>
+              <li><strong>Requirements</strong>: macOS 26+, Apple Silicon, and an internet connection for web searches.</li>
+              <li><strong>Clone</strong>: <code class="inline">git clone https://github.com/Eddy-Barraud/SilicIA.git</code></li>
+              <li><strong>Open</strong>: <code class="inline">open SilicIA.xcodeproj</code></li>
+              <li><strong>Build</strong>: Xcode <code class="inline">⌘B</code> (or <code class="inline">⌘R</code> to run).</li>
+            </ul>
+          </section>
+        </div>
+      </div>
+
+      <aside class="shot" aria-label="Screenshot">
+        <img src="Screenshots/Factorial.png" alt="SilicIA screenshot showing an example query" loading="lazy" />
+        <div class="caption">
+          Screenshot from the repository: example usage asking the factorial function.
+        </div>
+      </aside>
+    </main>
+
+    <div class="footer" role="contentinfo">
+      <div>
+        Created by Eddy Barraud. SilicIA is licensed under the SilicIA Non‑Commercial License v1.0.
+      </div>
+      <div>
+        <a href="https://github.com/Eddy-Barraud/SilicIA/blob/main/LICENSE" rel="noopener noreferrer" target="_blank">License</a>
+        ·
+        <a href="https://github.com/Eddy-Barraud/SilicIA/blob/main/Privacy.md" rel="noopener noreferrer" target="_blank">Privacy</a>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
