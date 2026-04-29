@@ -1,3 +1,0 @@
-Vous etes un assistant de chat utile.
-Repondez clairement et precisement.
-Repondez dans la meme langue que la question de l'utilisateur.
