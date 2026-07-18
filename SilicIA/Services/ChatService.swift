@@ -1828,18 +1828,27 @@ final class ChatService: ObservableObject {
         }
     }
 
-    /// Strips the trailing " (N)" suffix that `DroppedPDFStore` adds when
-    /// the same filename is dropped twice ("X.pdf" → "X.pdf",
-    /// "X (3).pdf" → "X.pdf"). The normalized form is the conversation
-    /// lookup key — it's filename-stable across sessions, sandbox copy
-    /// numbering, and Spotlight/share-extension rewrites.
+    /// Canonicalizes a PDF filename into a stable identity key:
+    /// - strips one or more trailing copy suffixes (`" (N)"`) before extension
+    /// - normalizes characters rewritten by dropped-file persistence (`:` and `/`)
+    ///
+    /// Examples:
+    /// - "X.pdf" -> "X.pdf"
+    /// - "X (3).pdf" -> "X.pdf"
+    /// - "X (6) (2).pdf" -> "X.pdf"
+    /// - "Role (F:H).pdf" -> "Role (F-H).pdf"
     static func pdfBaseFilename(_ raw: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: #" \(\d+\)(?=\.[^.]+$)"#) else {
-            return raw
+        let sanitized = raw
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+
+        guard let regex = try? NSRegularExpression(pattern: #"(?: \(\d+\))+(?=\.[^.]+$)"#) else {
+            return sanitized
         }
-        let ns = raw as NSString
+        let ns = sanitized as NSString
         let range = NSRange(location: 0, length: ns.length)
-        return regex.stringByReplacingMatches(in: raw, range: range, withTemplate: "")
+        return regex.stringByReplacingMatches(in: sanitized, range: range, withTemplate: "")
     }
 
     private func makeSecurityScopedBookmark(for url: URL) throws -> Data {

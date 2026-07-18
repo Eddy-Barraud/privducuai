@@ -963,6 +963,10 @@ struct ChatView: View {
         compactEmptyURLSources()
 
         let message = trimmed
+        #if DEBUG
+        let selectedPDFs = currentSelectedPDFs()
+        debugSync("submitMessage sending pdfCount=\(selectedPDFs.count) pdfs=\(selectedPDFs.map(\.lastPathComponent)) imageCount=\(currentSelectedImages().count)")
+        #endif
         messageInput = ""
 
         // Capture the task so the Stop button can cancel it. Replaces
@@ -1005,10 +1009,27 @@ struct ChatView: View {
 
     /// Returns the persistent file URLs of all PDF context rows.
     private func currentSelectedPDFs() -> [URL] {
-        contextSources.compactMap { source -> URL? in
+        deduplicatedPDFURLsByBaseName(contextSources.compactMap { source -> URL? in
             guard case .pdf(let url) = source.kind else { return nil }
             return url
+        })
+    }
+
+    /// Deduplicates PDFs by normalized base filename while preserving order.
+    /// Keeps sync idempotent when the same logical PDF arrives through
+    /// different sandbox paths or persisted copy names.
+    private func deduplicatedPDFURLsByBaseName(_ urls: [URL]) -> [URL] {
+        var seen = Set<String>()
+        var result: [URL] = []
+        for url in urls {
+            let key = ChatService.pdfBaseFilename(url.lastPathComponent)
+            if seen.insert(key).inserted {
+                result.append(url)
+            } else {
+                debugSync("Dedup suppressed duplicate PDF key=\(key) url=\(url.path)")
+            }
         }
+        return result
     }
 
     /// Returns the persistent file URLs of all image context rows.
@@ -1178,19 +1199,23 @@ struct ChatView: View {
 
     /// Adds incoming shared URLs/PDFs/images to context rows once.
     private func mergeSharedInputsIfNeeded() {
+        debugSync("mergeSharedInputsIfNeeded sharedURLs=\(sharedURLs.count) sharedPDFs=\(sharedPDFs.count) sharedImages=\(sharedImages.count)")
         let incomingURLs = sharedURLs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        let incomingPDFs = sharedPDFs
-            .filter { $0.pathExtension.lowercased() == "pdf" }
-            .compactMap { sourceURL in
-                persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
-            }
+        let incomingPDFs = deduplicatedPDFURLsByBaseName(
+            sharedPDFs
+                .filter { $0.pathExtension.lowercased() == "pdf" }
+                .compactMap { sourceURL in
+                    persistDroppedPDF(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
+                }
+        )
         let incomingImages = sharedImages
             .filter { Self.imageFileExtensions.contains($0.pathExtension.lowercased()) }
             .compactMap { sourceURL in
                 persistDroppedImage(sourceURL, preferredFileName: sourceURL.lastPathComponent) ?? sourceURL
             }
+        debugSync("mergeSharedInputs incoming urls=\(incomingURLs.count) pdfs=\(incomingPDFs.map(\.lastPathComponent)) images=\(incomingImages.count)")
         guard !incomingURLs.isEmpty || !incomingPDFs.isEmpty || !incomingImages.isEmpty else { return }
 
         // If a conversation is already loaded and anchored to one of the
@@ -1206,10 +1231,13 @@ struct ChatView: View {
                 ChatService.pdfBaseFilename($0.lastPathComponent) == normalizedActive
             }
         } ?? false
+        debugSync("mergeSharedInputs activePDF=\(activeFilename ?? "nil") matchesActiveConversation=\(matchesActiveConversation)")
 
         if matchesActiveConversation {
+            debugSync("mergeSharedInputs action=attach")
             attachSharedInputsToCurrentConversation(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
         } else {
+            debugSync("mergeSharedInputs action=startNew")
             startNewConversationFromSharedInputs(urls: incomingURLs, pdfs: incomingPDFs, images: incomingImages)
         }
         sharedURLs.removeAll()
@@ -1241,8 +1269,10 @@ struct ChatView: View {
         messageInput = ""
         chatService.resetConversation()
 
+        let uniquePDFs = deduplicatedPDFURLsByBaseName(pdfs)
+        debugSync("startNewConversationFromSharedInputs urls=\(urls.count) pdfs=\(uniquePDFs.map(\.lastPathComponent)) images=\(images.count)")
         var newSources: [ContextSource] = urls.map { ContextSource(kind: .url(text: $0)) }
-        newSources.append(contentsOf: pdfs.map { ContextSource(kind: .pdf(url: $0)) })
+        newSources.append(contentsOf: uniquePDFs.map { ContextSource(kind: .pdf(url: $0)) })
         newSources.append(contentsOf: images.map { ContextSource(kind: .image(url: $0)) })
         contextSources = newSources
     }
@@ -1264,6 +1294,7 @@ struct ChatView: View {
             return false
         }) else {
             debugDrop("Ignoring duplicate PDF context URL: \(url.path)")
+            debugSync("insertPDFSource suppressed duplicate key=\(incomingKey) url=\(url.path)")
             return
         }
 
@@ -1275,6 +1306,7 @@ struct ChatView: View {
             debugDrop("Appended dropped PDF as new context row: \(url.lastPathComponent)")
         }
         onPDFAddedToContext?(url)
+        debugSync("insertPDFSource accepted key=\(incomingKey) rowIndex=\(String(describing: rowIndex)) contextPDFCount=\(currentSelectedPDFs().count)")
         scheduleContextPreanalysis()
     }
 
@@ -1307,6 +1339,12 @@ struct ChatView: View {
     private func debugDrop(_ message: @autoclosure () -> String) {
         #if DEBUG
         print("[ChatView][PDFDrop] \(message())")
+        #endif
+    }
+
+    private func debugSync(_ message: @autoclosure () -> String) {
+        #if DEBUG
+        print("[ChatView][PDFSync] \(message())")
         #endif
     }
 

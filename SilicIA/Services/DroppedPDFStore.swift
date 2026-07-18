@@ -30,6 +30,14 @@ enum DroppedPDFStore {
 
         do {
             try fileManager.createDirectory(at: storageDirectory, withIntermediateDirectories: true)
+            let normalizedStorageDirectory = storageDirectory.standardizedFileURL.resolvingSymlinksInPath()
+            let normalizedSourceDirectory = sourceURL
+                .standardizedFileURL
+                .resolvingSymlinksInPath()
+                .deletingLastPathComponent()
+            if normalizedSourceDirectory == normalizedStorageDirectory {
+                return sourceURL.standardizedFileURL
+            }
             let destinationURL = uniqueDestinationURL(preferredFileName: preferredFileName, sourceURL: sourceURL)
             if fileManager.fileExists(atPath: destinationURL.path) {
                 try fileManager.removeItem(at: destinationURL)
