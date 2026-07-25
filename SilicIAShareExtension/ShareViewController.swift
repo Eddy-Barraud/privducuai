@@ -74,9 +74,16 @@ final class ShareViewController: PlatformShareViewController {
             }
         }
 
-        let deduplicatedWebURLs = deduplicated(sharedWebURLs)
+        var deduplicatedWebURLs = deduplicated(sharedWebURLs)
         let deduplicatedPDFNames = deduplicated(sharedPDFFileNames)
         let deduplicatedImageNames = deduplicated(sharedImageFileNames)
+
+        // Prefer shared PDFs (e.g. Safari webpage as PDF) over raw URLs.
+        // Keep URL sharing only as a fallback when no PDF was captured.
+        if !deduplicatedPDFNames.isEmpty {
+            deduplicatedWebURLs.removeAll()
+        }
+
         guard !deduplicatedWebURLs.isEmpty
             || !deduplicatedPDFNames.isEmpty
             || !deduplicatedImageNames.isEmpty else {
