@@ -52,17 +52,12 @@ final class ShareViewController: PlatformShareViewController {
             return
         }
 
-        var sharedWebURLs: [String] = []
         var sharedPDFFileNames: [String] = []
         var sharedImageFileNames: [String] = []
 
         for item in extensionItems {
             let providers = item.attachments ?? []
             for provider in providers {
-                if let sharedURL = await loadSharedWebURL(from: provider) {
-                    sharedWebURLs.append(sharedURL.absoluteString)
-                }
-
                 if let storedPDFName = await persistSharedPDF(from: provider) {
                     sharedPDFFileNames.append(storedPDFName)
                     continue
@@ -74,24 +69,15 @@ final class ShareViewController: PlatformShareViewController {
             }
         }
 
-        var deduplicatedWebURLs = deduplicated(sharedWebURLs)
         let deduplicatedPDFNames = deduplicated(sharedPDFFileNames)
         let deduplicatedImageNames = deduplicated(sharedImageFileNames)
 
-        // Prefer shared PDFs (e.g. Safari webpage as PDF) over raw URLs.
-        // Keep URL sharing only as a fallback when no PDF was captured.
-        if !deduplicatedPDFNames.isEmpty {
-            deduplicatedWebURLs.removeAll()
-        }
-
-        guard !deduplicatedWebURLs.isEmpty
-            || !deduplicatedPDFNames.isEmpty
+        guard !deduplicatedPDFNames.isEmpty
             || !deduplicatedImageNames.isEmpty else {
             return
         }
 
         guard let appURL = buildAppURL(
-            sharedWebURLs: deduplicatedWebURLs,
             sharedPDFFileNames: deduplicatedPDFNames,
             sharedImageFileNames: deduplicatedImageNames
         ) else {
@@ -99,28 +85,6 @@ final class ShareViewController: PlatformShareViewController {
         }
 
         _ = await openContainingApp(with: appURL)
-    }
-
-    private func loadSharedWebURL(from provider: NSItemProvider) async -> URL? {
-        if provider.hasItemConformingToTypeIdentifier(UTType.url.identifier),
-           let item = await loadItem(from: provider, typeIdentifier: UTType.url.identifier),
-           let url = extractURL(from: item),
-           !url.isFileURL,
-           let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
-            return url
-        }
-
-        if provider.hasItemConformingToTypeIdentifier(UTType.text.identifier),
-           let item = await loadItem(from: provider, typeIdentifier: UTType.text.identifier),
-           let string = item as? String,
-           let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)),
-           let scheme = url.scheme?.lowercased(),
-           scheme == "http" || scheme == "https" {
-            return url
-        }
-
-        return nil
     }
 
     private func persistSharedPDF(from provider: NSItemProvider) async -> String? {
@@ -432,7 +396,6 @@ final class ShareViewController: PlatformShareViewController {
     }
 
     private func buildAppURL(
-        sharedWebURLs: [String],
         sharedPDFFileNames: [String],
         sharedImageFileNames: [String]
     ) -> URL? {
@@ -440,10 +403,6 @@ final class ShareViewController: PlatformShareViewController {
         components.scheme = "SilicIA"
         components.host = "share"
         var queryItems: [URLQueryItem] = []
-
-        for value in sharedWebURLs {
-            queryItems.append(URLQueryItem(name: "url", value: value))
-        }
 
         for fileName in sharedPDFFileNames {
             queryItems.append(URLQueryItem(name: "sharedPDF", value: fileName))
