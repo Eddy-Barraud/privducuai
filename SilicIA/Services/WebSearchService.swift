@@ -152,7 +152,7 @@ class WebSearchService: ObservableObject {
 
     private let session: URLSession
 
-    private func debugLog(_ message: String) {
+    private nonisolated func debugLog(_ message: String) {
         #if DEBUG
         print("[WebSearchService] \(message)")
         #endif
@@ -294,8 +294,12 @@ class WebSearchService: ObservableObject {
         async let wikipediaOutcome: ([SearchResult], Error?) = {
             guard useWikipedia else { return ([], nil) }
             do {
+                let cleanedQuery = WikipediaQueryCleaner.clean(query)
+                if cleanedQuery != query {
+                    debugLog("Wikipedia query adapted: '\(query)' -> '\(cleanedQuery)'")
+                }
                 let results = try await executeWikipediaSearch(
-                    query: query,
+                    query: cleanedQuery,
                     language: language,
                     limit: maxWikipediaResults
                 )
@@ -360,7 +364,8 @@ class WebSearchService: ObservableObject {
 
     /// Executes Wikipedia REST search and enriches each page with full source content.
     private func executeWikipediaSearch(query: String, language: ModelLanguage, limit: Int) async throws -> [SearchResult] {
-        guard let searchURL = wikipediaSearchURL(query: query, language: language, limit: limit) else {
+        let effectiveQuery = WikipediaQueryCleaner.clean(query)
+        guard let searchURL = wikipediaSearchURL(query: effectiveQuery, language: language, limit: limit) else {
             throw SearchError.invalidURL
         }
 
@@ -606,7 +611,11 @@ class WebSearchService: ObservableObject {
     }
 
     private func wikipediaHost(for language: ModelLanguage) -> String {
-        language == .french ? "fr.wikipedia.org" : "en.wikipedia.org"
+        switch language {
+        case .french: return "fr.wikipedia.org"
+        case .spanish: return "es.wikipedia.org"
+        case .english: return "en.wikipedia.org"
+        }
     }
 }
 
